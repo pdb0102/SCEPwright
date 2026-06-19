@@ -6,10 +6,8 @@ on:
       - 'v*'
 
 jobs:
-  release:
+  test:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v7
 
@@ -21,15 +19,56 @@ jobs:
       - name: Test
         run: dotnet test --configuration Release
 
-      - name: Publish
-        run: dotnet publish src/IntuneSimulator.Host/IntuneSimulator.Host.csproj --configuration Release --output ./publish
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # Self-contained builds — the .NET runtime is bundled, so consumers need no install.
+        rid: [win-x64, linux-x64, linux-arm64, osx-x64, osx-arm64]
+    steps:
+      - uses: actions/checkout@v7
 
-      - name: Zip artifacts
-        run: cd publish && zip -r ../IntuneSimulator-${{ github.ref_name }}.zip .
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Publish (self-contained, ${{ matrix.rid }})
+        run: >
+          dotnet publish src/IntuneSimulator.Host/IntuneSimulator.Host.csproj
+          --configuration Release
+          --runtime ${{ matrix.rid }}
+          --self-contained true
+          --output ./publish/${{ matrix.rid }}
+
+      - name: Zip
+        run: cd publish/${{ matrix.rid }} && zip -r ../../IntuneSimulator-${{ github.ref_name }}-${{ matrix.rid }}.zip .
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: IntuneSimulator-${{ matrix.rid }}
+          path: IntuneSimulator-${{ github.ref_name }}-${{ matrix.rid }}.zip
+          retention-days: 1
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # Needed so body_path can read RELEASE-NOTES.md from the tagged commit.
+      - uses: actions/checkout@v7
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
 
       - name: Create Release
         uses: softprops/action-gh-release@v3
         with:
-          files: IntuneSimulator-${{ github.ref_name }}.zip
+          files: dist/**/*.zip
           body_path: RELEASE-NOTES.md
           generate_release_notes: true

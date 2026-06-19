@@ -16,13 +16,25 @@ It implements the **entire call chain** the Microsoft "Intune Access" sample (an
 - **Challenge-password endpoint** (`/challenge`) — a web page for manual copy-out and a JSON form for automation, plus all the URLs to configure.
 - **Info page & startup banner**, **per-request console logging**, **hardened auto-TLS** (or bring your own via `--tls-cert`), and an **ADAL-fallback trigger** (`failTokenScopeContains`).
 
-## Quick start
+## Download & run
+
+Grab the self-contained build for your platform from the **Assets** below — the .NET runtime is bundled, so **no install is required**. Unzip and run the executable:
+
+| Platform | Asset | Run |
+|---|---|---|
+| Windows (x64) | `…-win-x64.zip` | `IntuneSimulator.Host.exe` |
+| Linux (x64 / ARM64) | `…-linux-x64.zip` / `…-linux-arm64.zip` | `./IntuneSimulator.Host` |
+| macOS (Intel / Apple Silicon) | `…-osx-x64.zip` / `…-osx-arm64.zip` | `./IntuneSimulator.Host` |
+
+On Linux/macOS, `chmod +x IntuneSimulator.Host` if the executable bit didn't survive unzip; on macOS, clear the download quarantine first with `xattr -d com.apple.quarantine IntuneSimulator.Host` (or right-click → Open).
+
+Or, with the .NET 8 SDK, run from source — clone the repo, or download the **Source code** archive attached to this release below:
 
 ```bash
 dotnet run --project src/IntuneSimulator.Host
 ```
 
-Defaults: HTTP **8080**, HTTPS **8443**, auth password **`IntunePassw0rd!`**, tenant `contoso.onmicrosoft.com`. The startup banner prints every URL to configure. Run with `--help` for all options. See the [README](README.md) for the full configuration table, TLS-trust guidance, and embedding instructions.
+Defaults: HTTP **8080**, HTTPS **8443**, auth password **`IntunePassw0rd!`**, tenant `contoso.onmicrosoft.com`. The startup banner prints every URL to configure. Run with `--help` for all options. See the [README](https://github.com/pdb0102/IntuneSimulator/blob/main/README.md) for the full configuration table, TLS-trust guidance, and embedding instructions.
 
 ## Hosting
 
