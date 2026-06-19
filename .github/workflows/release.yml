@@ -18,8 +18,11 @@ jobs:
         with:
           dotnet-version: 8.0.x
 
+      - name: Test
+        run: dotnet test --configuration Release
+
       - name: Publish
-        run: dotnet dotnet publish IntuneSimulator.Host/IntuneSimulator.Host.csproj --configuration Release --output ./publish
+        run: dotnet publish src/IntuneSimulator.Host/IntuneSimulator.Host.csproj --configuration Release --output ./publish
 
       - name: Zip artifacts
         run: cd publish && zip -r ../IntuneSimulator-${{ github.ref_name }}.zip .
@@ -28,4 +31,5 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           files: IntuneSimulator-${{ github.ref_name }}.zip
+          body_path: RELEASE-NOTES.md
           generate_release_notes: true

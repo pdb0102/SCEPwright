@@ -1,0 +1,32 @@
+# Configures GitHub's automatically generated release notes (the "What's Changed"
+# section appended below RELEASE-NOTES.md). PRs are grouped by their labels.
+# Docs: https://docs.github.com/en/repositories/releasing-projects-on-github/automatically-generated-release-notes
+changelog:
+  exclude:
+    labels:
+      - ignore-for-release
+    authors:
+      - dependabot
+      - github-actions
+  categories:
+    - title: Features
+      labels:
+        - enhancement
+        - feature
+    - title: Fixes
+      labels:
+        - bug
+        - fix
+    - title: Documentation
+      labels:
+        - documentation
+    - title: Maintenance
+      labels:
+        - chore
+        - dependencies
+        - refactor
+    # Catch-all — any merged PR not matching a category above (incl. unlabeled).
+    # Must stay last.
+    - title: Other Changes
+      labels:
+        - "*"
