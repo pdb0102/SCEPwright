@@ -46,7 +46,7 @@ jobs:
         run: cd publish/${{ matrix.rid }} && zip -r ../../IntuneSimulator-${{ github.ref_name }}-${{ matrix.rid }}.zip .
 
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: IntuneSimulator-${{ matrix.rid }}
           path: IntuneSimulator-${{ github.ref_name }}-${{ matrix.rid }}.zip
@@ -62,7 +62,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Download all build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: dist
 
