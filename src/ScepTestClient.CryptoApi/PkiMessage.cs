@@ -12,6 +12,9 @@ public sealed class PkiMessage {
     public string DigestAlgorithmOid { get; set; } = Algorithms.OidFor("SHA-256")!;
     public string ContentEncryptionAlgorithmOid { get; set; } = Algorithms.OidFor("AES-128-CBC")!;
     public string? TransactionId { get; set; }
+    public string? IssuerName { get; set; }       // GetCert / GetCrl: issuer DN of the target cert's CA
+    public string? SerialNumber { get; set; }      // GetCert / GetCrl: target cert serial, hex (X509Certificate2.SerialNumber form)
+    public string? SubjectName { get; set; }       // CertPoll: subject DN being polled
 
     public PkiStatus PkiStatus { get; set; }
     public FailInfo FailInfo { get; set; } = FailInfo.None;
@@ -21,6 +24,7 @@ public sealed class PkiMessage {
     public bool SignatureValid { get; set; }
     public byte[]? DecryptedContent { get; set; }
     public IReadOnlyList<X509Certificate2> IssuedCerts { get; set; } = System.Array.Empty<X509Certificate2>();
+    public IReadOnlyList<byte[]> IssuedCrls { get; set; } = System.Array.Empty<byte[]>();
     public List<ConformanceNote> ConformanceNotes { get; } = new();
 
     public bool Encode(IScepCrypto crypto, out byte[] der, out string error) =>

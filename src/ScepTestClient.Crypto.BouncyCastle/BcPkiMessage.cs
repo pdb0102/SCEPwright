@@ -61,6 +61,17 @@ internal static class BcPkiMessage {
         return signed_data.GetEncoded();
     }
 
+    public static byte[] BuildIssuerAndSerial(string issuer_dn, string serial_hex) {
+        Org.BouncyCastle.Asn1.X509.X509Name issuer;
+        Org.BouncyCastle.Math.BigInteger serial;
+        IssuerAndSerialNumber ias;
+
+        issuer = new Org.BouncyCastle.Asn1.X509.X509Name(issuer_dn);
+        serial = new Org.BouncyCastle.Math.BigInteger(serial_hex, 16);
+        ias = new IssuerAndSerialNumber(issuer, serial);
+        return ias.GetDerEncoded();
+    }
+
     public static PkiMessage Decode(byte[] der, BcKey recipient_key, CodecOptions options) {
         CmsSignedData signed_data;
         IStore<Org.BouncyCastle.X509.X509Certificate> cert_store;

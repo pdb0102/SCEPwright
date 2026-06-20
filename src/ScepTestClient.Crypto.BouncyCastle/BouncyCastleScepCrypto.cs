@@ -92,6 +92,18 @@ public sealed class BouncyCastleScepCrypto : IScepCrypto {
                     }
                     der = BcPkiMessage.EncodePkiOperation(message, csr_der, signer_key, ScepAttributes.NumberFor(message.MessageType));
                     return true;
+                case MessageType.GetCert:
+                case MessageType.GetCrl:
+                    if (string.IsNullOrEmpty(message.IssuerName) || string.IsNullOrEmpty(message.SerialNumber)) {
+                        error = $"IssuerName and SerialNumber must be set for {message.MessageType}";
+                        return false;
+                    }
+                    der = BcPkiMessage.EncodePkiOperation(
+                        message,
+                        BcPkiMessage.BuildIssuerAndSerial(message.IssuerName!, message.SerialNumber!),
+                        signer_key,
+                        ScepAttributes.NumberFor(message.MessageType));
+                    return true;
                 default:
                     error = $"unsupported message type: {message.MessageType}";
                     return false;
