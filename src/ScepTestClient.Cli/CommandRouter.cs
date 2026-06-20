@@ -66,6 +66,9 @@ public static class CommandRouter {
             case "test":
                 return RunTest(args, data_root, output);
 
+            case "run":
+                return RunScenario(args, data_root, output);
+
             case "certs":
                 return RunCerts(args, data_root, output);
 
@@ -105,9 +108,28 @@ public static class CommandRouter {
             case "show":
                 return RunServersShow(args, data_root, output);
 
+            case "suggest":
+                return RunServersSuggest(args, data_root, output);
+
             default:
                 return WriteUsage(output);
         }
+    }
+
+    private static int RunServersSuggest(string[] args, string data_root, TextWriter output) {
+        string server_id;
+        ScepClient client;
+        StoredServer stored;
+        ScepCapabilities caps;
+        System.Collections.Generic.IReadOnlyList<string> lines;
+
+        if (args.Length < 3) { output.WriteLine("usage: servers suggest <id>"); return 2; }
+        server_id = args[2];
+        if (!BuildClient(server_id, data_root, output, out client, out stored)) { return 1; }
+        caps = client.GetCaCaps().Value ?? ScepCapabilities.Parse(string.Empty);
+        lines = ScepTestClient.Core.Testing.ServerSuggest.For(server_id, caps);
+        foreach (string line in lines) { output.WriteLine(line); }
+        return 0;
     }
 
     private static int RunServersAdd(string[] args, string data_root, TextWriter output) {
@@ -275,15 +297,17 @@ public static class CommandRouter {
         ScepResult<EnrollOutcome> outcome;
         ServerConfig config;
         ConsoleTrace tracer;
+        System.Net.Http.HttpClient http;
+        string challenge_error;
 
         if (args.Length < 2) {
-            output.WriteLine("usage: get <serverId> --subject \"CN=x\" [--challenge <pw>] [--key-spec rsa:2048] [--sid <s>] [-v]");
+            output.WriteLine("usage: get <serverId> --subject \"CN=x\" [--challenge <pw>] [--simulator <url>] [--ndes --ndes-user <u> --ndes-password <p> [--ndes-admin-url <url>]] [--key-spec rsa:2048] [--sid <s>] [-v]");
             return 2;
         }
 
         server_id = args[1];
         subject = Opt(args, "--subject");
-        challenge = Opt(args, "--challenge");
+        challenge = null;
         key_spec_str = Opt(args, "--key-spec") ?? "rsa:2048";
         sid = Opt(args, "--sid");
         verbosity = CountFlag(args, "-v");
@@ -306,6 +330,15 @@ public static class CommandRouter {
         if (stored is null) {
             output.WriteLine($"unknown server '{server_id}'");
             return 2;
+        }
+
+        http = new System.Net.Http.HttpClient();
+        if (!ResolveChallenge(args, stored.Url, http, out challenge, out challenge_error)) {
+            output.WriteLine($"challenge resolution failed: {challenge_error}");
+            return 1;
+        }
+        if (challenge != null) {
+            output.WriteLine($"challenge: {Redaction.Hash(challenge)}");
         }
 
         load_result = ScepCrypto.Load(null, out crypto, out crypto_error);
@@ -713,6 +746,81 @@ public static class CommandRouter {
         }
     }
 
+    // -------------------------------------------------------------------------
+    // run (scenario / playlist)
+    // -------------------------------------------------------------------------
+
+    private static int RunScenario(string[] args, string data_root, TextWriter output) {
+        string path;
+        string server_id;
+        string json;
+        ScepTestClient.Core.Testing.ScenarioFile scenario;
+        string parse_error;
+        ScepClient client;
+        StoredServer stored;
+        ScepResult<System.Collections.Generic.IReadOnlyList<System.Security.Cryptography.X509Certificates.X509Certificate2>> ca;
+        ScepTestClient.Core.Testing.TestReport report;
+        System.Collections.Generic.List<string> formats;
+
+        if (args.Length < 3) { output.WriteLine("usage: run <scenario.json> <server> [--report-format ...]"); return 2; }
+        path = args[1];
+        server_id = args[2];
+        if (!File.Exists(path)) { output.WriteLine($"scenario not found: {path}"); return 2; }
+        json = File.ReadAllText(path);
+        if (!ScepTestClient.Core.Testing.ScenarioRunner.Parse(json, out scenario, out parse_error)) { output.WriteLine($"bad scenario: {parse_error}"); return 2; }
+        if (!BuildClient(server_id, data_root, output, out client, out stored)) { return 1; }
+
+        ca = client.GetCaCert();
+        if (!ca.IsOk) { output.WriteLine($"GetCACert failed: {ca.Status} {ca.Error}"); return 1; }
+        report = ScepTestClient.Core.Testing.ScenarioRunner.Run(client, scenario, ca.Value[0]);
+
+        output.Write(ScepTestClient.Core.Reporting.ConsoleSummary.Format(report));
+        formats = ReadRepeated(args, "--report-format");
+        WriteReports(report, formats, data_root, server_id, output);
+        return report.Failed == 0 ? 0 : 1;
+    }
+
+    // -------------------------------------------------------------------------
+    // Challenge-source resolution (explicit > simulator > ndes)
+    // -------------------------------------------------------------------------
+
+    private static bool ResolveChallenge(string[] args, string server_url, System.Net.Http.HttpClient http, out string? challenge, out string error) {
+        string? explicit_pw;
+        string? simulator;
+        ScepTestClient.Core.Challenge.IChallengeSource source;
+        string resolved;
+
+        challenge = null;
+        error = string.Empty;
+
+        explicit_pw = Opt(args, "--challenge");
+        if (explicit_pw != null) { challenge = explicit_pw; return true; }
+
+        simulator = Opt(args, "--simulator");
+        if (simulator != null) {
+            source = new ScepTestClient.Core.Challenge.SimulatorChallengeSource(http, simulator);
+            if (!source.TryGet(out resolved, out error)) { return false; }
+            challenge = resolved;
+            return true;
+        }
+
+        if (HasFlag(args, "--ndes")) {
+            string admin_url;
+            string user;
+            string password;
+
+            admin_url = ScepTestClient.Core.Challenge.NdesAdminUrl.Derive(server_url, Opt(args, "--ndes-admin-url"));
+            user = Opt(args, "--ndes-user") ?? string.Empty;
+            password = Opt(args, "--ndes-password") ?? string.Empty;
+            source = new ScepTestClient.Core.Challenge.NdesChallengeSource(http, admin_url, user, password);
+            if (!source.TryGet(out resolved, out error)) { return false; }
+            challenge = resolved;
+            return true;
+        }
+
+        return true; // no challenge source; null is fine
+    }
+
     private static RenewalVariant ParseVariant(string? text) {
         switch (text) {
             case "reenroll-same-subject": return RenewalVariant.ReenrollSameSubject;
@@ -816,17 +924,19 @@ public static class CommandRouter {
         output.WriteLine("  servers add <url> [--name <n>] [--ca-identifier <c>] [--transport get|post]");
         output.WriteLine("  servers list");
         output.WriteLine("  servers show <id>");
+        output.WriteLine("  servers suggest <id>");
         output.WriteLine("  getcacaps <serverId>");
         output.WriteLine("  get <serverId> --subject \"CN=x\" [--challenge <pw>] [--key-spec rsa:2048] [--sid <s>] [-v]");
         output.WriteLine("  certs list [serverId]");
         output.WriteLine("  getcacert <serverId>");
         output.WriteLine("  getnextcacert <serverId>");
-        output.WriteLine("  enroll <serverId> --subject \"CN=x\" [--challenge <pw>] [--key-spec rsa:2048] [--encrypt-keys --key-pass <pw>]");
+        output.WriteLine("  enroll <serverId> --subject \"CN=x\" [--challenge <pw> | --simulator <url> | --ndes --ndes-user <u> --ndes-password <p>] [--key-spec rsa:2048] [--encrypt-keys --key-pass <pw>]");
         output.WriteLine("  renew <certId> [--variant proper|reenroll-same-subject|pkcsreq-old-cert|same-key|expired] [--encrypt-keys --key-pass <pw>]");
         output.WriteLine("  getcert <serverId> --issuer <dn> --serial <hex>");
         output.WriteLine("  getcrl <serverId> --issuer <dn> --serial <hex>");
         output.WriteLine("  poll <serverId> --issuer <dn> --subject <dn> --txn <id>");
         output.WriteLine("  test <lifecycle|full|probe> <serverId> [--report-format junit|trx|json|md] [--jamf-max-wait <ms>]");
+        output.WriteLine("  run <scenario.json> <serverId> [--report-format junit|trx|json|md]");
         output.WriteLine("  config show");
         return 2;
     }
