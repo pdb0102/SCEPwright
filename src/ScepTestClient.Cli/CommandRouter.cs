@@ -75,6 +75,9 @@ public static class CommandRouter {
             case "config":
                 return RunConfig(args, data_root, output);
 
+            case "crypto":
+                return CryptoCommand.Run(args, data_root, output);
+
             case "--help":
             case "-h":
             case "help":
@@ -974,6 +977,8 @@ public static class CommandRouter {
         output.WriteLine("  test <lifecycle|full|probe> <serverId> [--report-format junit|trx|json|md] [--jamf-max-wait <ms>]");
         output.WriteLine("  run <scenario.json> <serverId> [--report-format junit|trx|json|md]");
         output.WriteLine("  config show");
+        output.WriteLine("  crypto info");
+        output.WriteLine("  crypto list");
         return 2;
     }
 
