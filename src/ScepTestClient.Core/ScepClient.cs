@@ -575,7 +575,7 @@ public sealed class ScepClient {
     // GetNewCertificate
     // -------------------------------------------------------------------------
 
-    public async Task<ScepResult<EnrollOutcome>> GetNewCertificateAsync(EnrollRequest request, Storage.CertStore store, Storage.UseRecordLog log) {
+    public async Task<ScepResult<EnrollOutcome>> GetNewCertificateAsync(EnrollRequest request, Storage.CertStore store, Storage.UseRecordLog log, string? key_passphrase = null) {
         ScepResult<IReadOnlyList<X509Certificate2>> ca_result;
         ScepResult<EnrollOutcome> enroll_result;
         EnrollOutcome outcome;
@@ -596,7 +596,12 @@ public sealed class ScepClient {
             if (enroll_result.IsOk) {
                 outcome = enroll_result.Value;
                 if (outcome.Certificate is not null) {
-                    store.Save(Server.Id, outcome.Certificate, request, Crypto);
+                    if (string.IsNullOrEmpty(key_passphrase)) {
+                        store.Save(Server.Id, outcome.Certificate, request, Crypto);
+                    } else {
+                        store.Save(Server.Id, outcome.Certificate, request.Key, Crypto,
+                            challenge_password: request.ChallengePassword, renewed_from: null, transaction_id: outcome.TransactionId, passphrase: key_passphrase);
+                    }
                 }
                 log.Append(Server.Id, outcome);
             }
@@ -607,7 +612,7 @@ public sealed class ScepClient {
         }
     }
 
-    public ScepResult<EnrollOutcome> GetNewCertificate(EnrollRequest request, Storage.CertStore store, Storage.UseRecordLog log) {
+    public ScepResult<EnrollOutcome> GetNewCertificate(EnrollRequest request, Storage.CertStore store, Storage.UseRecordLog log, string? key_passphrase = null) {
         ScepResult<IReadOnlyList<X509Certificate2>> ca_result;
         ScepResult<EnrollOutcome> enroll_result;
         EnrollOutcome outcome;
@@ -628,7 +633,12 @@ public sealed class ScepClient {
             if (enroll_result.IsOk) {
                 outcome = enroll_result.Value;
                 if (outcome.Certificate is not null) {
-                    store.Save(Server.Id, outcome.Certificate, request, Crypto);
+                    if (string.IsNullOrEmpty(key_passphrase)) {
+                        store.Save(Server.Id, outcome.Certificate, request, Crypto);
+                    } else {
+                        store.Save(Server.Id, outcome.Certificate, request.Key, Crypto,
+                            challenge_password: request.ChallengePassword, renewed_from: null, transaction_id: outcome.TransactionId, passphrase: key_passphrase);
+                    }
                 }
                 log.Append(Server.Id, outcome);
             }

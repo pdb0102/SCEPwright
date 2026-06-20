@@ -24,6 +24,8 @@ public sealed class CertStore {
                        string? challenge_password, string? renewed_from, string? transaction_id, string? passphrase = null) {
         string cert_id;
         string cert_dir;
+        string plain_path;
+        string enc_path;
         byte[] key_der;
         string key_error;
         CertRecord metadata;
@@ -34,12 +36,17 @@ public sealed class CertStore {
 
         File.WriteAllText(Path.Combine(cert_dir, "cert.pem"), cert.ExportCertificatePem());
 
+        plain_path = Path.Combine(cert_dir, "key.pkcs8");
+        enc_path = Path.Combine(cert_dir, "key.pkcs8.enc");
+
         if (!string.IsNullOrEmpty(passphrase)) {
             if (crypto.ExportPrivateKeyPkcs8Encrypted(key, passphrase!, out key_der, out key_error)) {
-                File.WriteAllBytes(Path.Combine(cert_dir, "key.pkcs8.enc"), key_der);
+                if (File.Exists(plain_path)) { File.Delete(plain_path); }
+                File.WriteAllBytes(enc_path, key_der);
             }
         } else if (crypto.ExportPrivateKeyPkcs8(key, out key_der, out key_error)) {
-            File.WriteAllBytes(Path.Combine(cert_dir, "key.pkcs8"), key_der);
+            if (File.Exists(enc_path)) { File.Delete(enc_path); }
+            File.WriteAllBytes(plain_path, key_der);
         }
 
         metadata = new CertRecord {

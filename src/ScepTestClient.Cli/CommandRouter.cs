@@ -292,6 +292,11 @@ public static class CommandRouter {
             return 2;
         }
 
+        if (encrypt_keys && string.IsNullOrEmpty(key_pass)) {
+            output.WriteLine("--encrypt-keys requires --key-pass <pw>");
+            return 2;
+        }
+
         registry = new ServerRegistry(data_root);
         stored = registry.Get(server_id);
 
@@ -339,12 +344,7 @@ public static class CommandRouter {
             Sid = sid,
         };
 
-        outcome = client.GetNewCertificate(request, new CertStore(data_root), new UseRecordLog(data_root));
-
-        if (outcome.IsOk && encrypt_keys && outcome.Value.Certificate is not null) {
-            new CertStore(data_root).Save(stored.Id, outcome.Value.Certificate, key, crypto,
-                challenge_password: challenge, renewed_from: null, transaction_id: outcome.Value.TransactionId, passphrase: key_pass ?? string.Empty);
-        }
+        outcome = client.GetNewCertificate(request, new CertStore(data_root), new UseRecordLog(data_root), key_passphrase: encrypt_keys ? key_pass : null);
 
         if (outcome.IsOk) {
             string cert_subject;
