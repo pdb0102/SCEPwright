@@ -2,7 +2,7 @@ namespace ScepTestClient.CryptoApi;
 
 public sealed class KeySpec {
     private static readonly string[] MlDsaSets = { "44", "65", "87" };
-    private static readonly string[] SlhDsaSets = { "128s", "192s", "256s", "128f", "192f", "256f" };
+    private static readonly string[] SlhDsaSets = { "128s", "192s", "256s" };
     private static readonly string[] MlKemSets = { "512", "768", "1024" };
 
     public string Algorithm { get; }

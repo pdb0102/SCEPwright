@@ -8,6 +8,7 @@ namespace ScepTestClient.Cli;
 internal static class CryptoCommand {
     public static int Run(string[] args, string data_root, TextWriter output) {
         string verb;
+        string? provider_path;
         IScepCrypto crypto;
         string error;
 
@@ -16,8 +17,9 @@ internal static class CryptoCommand {
             return 2;
         }
         verb = args[1];
+        provider_path = CommandRouter.ResolveProviderPath(args, data_root);
 
-        if (ScepCrypto.Load(CommandRouter.ResolveProviderPath(args, data_root), out crypto, out error) != ScepClientResult.Ok) {
+        if (ScepCrypto.Load(provider_path, out crypto, out error) != ScepClientResult.Ok) {
             output.WriteLine($"crypto load error: {error}");
             return 1;
         }
@@ -27,7 +29,7 @@ internal static class CryptoCommand {
                 return List(crypto, output);
 
             case "info":
-                return Info(crypto, output);
+                return Info(crypto, provider_path, output);
 
             default:
                 output.WriteLine("usage: crypto <info|list>");
@@ -45,8 +47,10 @@ internal static class CryptoCommand {
         return 0;
     }
 
-    private static int Info(IScepCrypto crypto, TextWriter output) {
-        output.WriteLine("Provider: built-in (BouncyCastle)");
+    private static int Info(IScepCrypto crypto, string? provider_path, TextWriter output) {
+        output.WriteLine(string.IsNullOrWhiteSpace(provider_path)
+            ? "Provider: built-in (BouncyCastle)"
+            : $"Provider: {provider_path}");
         output.WriteLine($"Tier A: {(crypto.Capabilities.PqTiers.TierA ? "yes" : "no")}");
         output.WriteLine($"Tier B: {(crypto.Capabilities.PqTiers.TierB ? "yes" : "no")}");
         output.WriteLine($"Tier C: {(crypto.Capabilities.PqTiers.TierC ? "yes" : "no")}  (ML-KEM CMS envelope — provider seam; BouncyCastle 2.5.0 has no CMS KEM recipient)");
