@@ -29,6 +29,12 @@ public sealed class TestCa {
     public bool PendingMode { get; set; }
     public string? ExpectedChallenge { get; set; }
 
+    // Optional separate RA encryption cert/key (SCEP split signing vs. encryption certs). When set,
+    // GetCACert presents a [signing, encryption] bundle and requests are decrypted with this key.
+    public X509Certificate2? EncryptionCert { get; private set; }
+    private AsymmetricCipherKeyPair? _encryption_key;
+    private AsymmetricKeyParameter RecipientKey => _encryption_key?.Private ?? KeyPair.Private;
+
     private TestCa(AsymmetricCipherKeyPair keyPair, Org.BouncyCastle.X509.X509Certificate cert) {
         KeyPair = keyPair;
         Certificate = cert;
@@ -55,6 +61,91 @@ public sealed class TestCa {
         cg.SetPublicKey(pair.Public);
 
         return new TestCa(pair, cg.Generate(new Asn1SignatureFactory("SHA256WITHRSA", pair.Private)));
+    }
+
+    // Builds a CA with a SEPARATE RA encryption certificate (RSA): the CA/signing cert carries
+    // digitalSignature+keyCertSign (no keyEncipherment), the RA cert carries keyEncipherment.
+    // GetCACert then presents both, and requests must be encrypted to the RA cert.
+    public static TestCa CreateWithRaEncryption() {
+        RsaKeyPairGenerator ca_gen;
+        AsymmetricCipherKeyPair ca_pair;
+        X509Name ca_name;
+        X509V3CertificateGenerator ca_cg;
+        TestCa ca;
+        RsaKeyPairGenerator ra_gen;
+        AsymmetricCipherKeyPair ra_pair;
+        X509V3CertificateGenerator ra_cg;
+
+        ca_gen = new RsaKeyPairGenerator();
+        ca_gen.Init(new KeyGenerationParameters(new SecureRandom(), 2048));
+        ca_pair = ca_gen.GenerateKeyPair();
+        ca_name = new X509Name("CN=Test SCEP CA (split)");
+        ca_cg = new X509V3CertificateGenerator();
+        ca_cg.SetSerialNumber(BigInteger.One);
+        ca_cg.SetIssuerDN(ca_name);
+        ca_cg.SetSubjectDN(ca_name);
+        ca_cg.SetNotBefore(DateTime.UtcNow.AddDays(-1));
+        ca_cg.SetNotAfter(DateTime.UtcNow.AddYears(5));
+        ca_cg.SetPublicKey(ca_pair.Public);
+        ca_cg.AddExtension(X509Extensions.KeyUsage, true, new KeyUsage(KeyUsage.DigitalSignature | KeyUsage.KeyCertSign));
+        ca = new TestCa(ca_pair, ca_cg.Generate(new Asn1SignatureFactory("SHA256WITHRSA", ca_pair.Private)));
+
+        ra_gen = new RsaKeyPairGenerator();
+        ra_gen.Init(new KeyGenerationParameters(new SecureRandom(), 2048));
+        ra_pair = ra_gen.GenerateKeyPair();
+        ra_cg = new X509V3CertificateGenerator();
+        ra_cg.SetSerialNumber(BigInteger.ValueOf(2));
+        ra_cg.SetIssuerDN(ca_name);
+        ra_cg.SetSubjectDN(new X509Name("CN=Test RA Encryption"));
+        ra_cg.SetNotBefore(DateTime.UtcNow.AddDays(-1));
+        ra_cg.SetNotAfter(DateTime.UtcNow.AddYears(5));
+        ra_cg.SetPublicKey(ra_pair.Public);
+        ra_cg.AddExtension(X509Extensions.KeyUsage, true, new KeyUsage(KeyUsage.KeyEncipherment));
+
+        ca._encryption_key = ra_pair;
+        ca.EncryptionCert = new X509Certificate2(ra_cg.Generate(new Asn1SignatureFactory("SHA256WITHRSA", ca_pair.Private)).GetEncoded());
+        return ca;
+    }
+
+    // A single CA cert whose KeyUsage is signature-only (digitalSignature+keyCertSign, NO
+    // keyEncipherment) — models a server that cannot receive an encrypted SCEP request.
+    public static TestCa CreateSigningOnly() {
+        RsaKeyPairGenerator gen;
+        AsymmetricCipherKeyPair pair;
+        X509Name name;
+        X509V3CertificateGenerator cg;
+
+        gen = new RsaKeyPairGenerator();
+        gen.Init(new KeyGenerationParameters(new SecureRandom(), 2048));
+        pair = gen.GenerateKeyPair();
+        name = new X509Name("CN=Test SCEP CA (signing only)");
+        cg = new X509V3CertificateGenerator();
+        cg.SetSerialNumber(BigInteger.One);
+        cg.SetIssuerDN(name);
+        cg.SetSubjectDN(name);
+        cg.SetNotBefore(DateTime.UtcNow.AddDays(-1));
+        cg.SetNotAfter(DateTime.UtcNow.AddYears(5));
+        cg.SetPublicKey(pair.Public);
+        cg.AddExtension(X509Extensions.KeyUsage, true, new KeyUsage(KeyUsage.DigitalSignature | KeyUsage.KeyCertSign));
+        return new TestCa(pair, cg.Generate(new Asn1SignatureFactory("SHA256WITHRSA", pair.Private)));
+    }
+
+    // GetCACert response: a single cert by default, or a degenerate PKCS#7 [signing, encryption]
+    // bundle when a separate RA encryption cert is configured.
+    public byte[] GetCaCertBundleDer() {
+        Org.BouncyCastle.X509.X509Certificate enc_bc;
+        IStore<Org.BouncyCastle.X509.X509Certificate> store;
+        CmsSignedDataGenerator gen;
+
+        if (EncryptionCert is null) {
+            return Certificate.GetEncoded();
+        }
+
+        enc_bc = new Org.BouncyCastle.X509.X509CertificateParser().ReadCertificate(EncryptionCert.RawData);
+        store = CollectionUtilities.CreateStore(new[] { Certificate, enc_bc });
+        gen = new CmsSignedDataGenerator();
+        gen.AddCertificates(store);
+        return gen.Generate(new CmsProcessableByteArray(System.Array.Empty<byte>()), false).GetEncoded();
     }
 
     public Org.BouncyCastle.X509.X509Certificate Issue(AsymmetricKeyParameter subject_public_key, string subject_dn) {
@@ -388,7 +479,7 @@ public sealed class TestCa {
         env_stream = new MemoryStream();
         signed.SignedContent.Write(env_stream);
         env = new CmsEnvelopedData(env_stream.ToArray());
-        return env.GetRecipientInfos().GetRecipients().Cast<RecipientInformation>().First().GetContent(KeyPair.Private);
+        return env.GetRecipientInfos().GetRecipients().Cast<RecipientInformation>().First().GetContent(RecipientKey);
     }
 
     public string PeekMessageType(byte[] der) {
@@ -449,7 +540,7 @@ public sealed class TestCa {
         env_stream = new MemoryStream();
         signed.SignedContent.Write(env_stream);
         env = new CmsEnvelopedData(env_stream.ToArray());
-        inner_payload = env.GetRecipientInfos().GetRecipients().Cast<RecipientInformation>().First().GetContent(KeyPair.Private);
+        inner_payload = env.GetRecipientInfos().GetRecipients().Cast<RecipientInformation>().First().GetContent(RecipientKey);
 
         trans_id = "tx";
         sender_nonce = new byte[16];

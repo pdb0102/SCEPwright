@@ -17,13 +17,15 @@ public sealed class FakeScepServer : IAsyncDisposable {
 
     private FakeScepServer(WebApplication app, TestCa ca) { _app = app; Ca = ca; ScepUrl = new Uri("http://127.0.0.1/scep"); }
 
-    public static async Task<FakeScepServer> StartAsync() {
+    public static async Task<FakeScepServer> StartAsync() => await StartAsync(null);
+
+    public static async Task<FakeScepServer> StartAsync(TestCa? ca_override) {
         WebApplicationBuilder builder;
         WebApplication app;
         TestCa ca;
         FakeScepServer self;
 
-        ca = TestCa.Create();
+        ca = ca_override ?? TestCa.Create();
         builder = WebApplication.CreateBuilder();
         builder.Logging.ClearProviders();
         builder.WebHost.UseUrls("http://127.0.0.1:0");
@@ -36,8 +38,11 @@ public sealed class FakeScepServer : IAsyncDisposable {
             op = ctx.Request.Query["operation"].ToString();
             if (op == "GetCACaps") { await ctx.Response.WriteAsync(self.CaCapsBody); return; }
             if (op == "GetCACert") {
-                ctx.Response.ContentType = "application/x-x509-ca-cert";
-                await ctx.Response.Body.WriteAsync(ca.Certificate.GetEncoded());
+                byte[] bundle;
+
+                bundle = ca.GetCaCertBundleDer();
+                ctx.Response.ContentType = ca.EncryptionCert is null ? "application/x-x509-ca-cert" : "application/x-x509-ca-ra-cert";
+                await ctx.Response.Body.WriteAsync(bundle);
                 return;
             }
             ctx.Response.StatusCode = 400;
