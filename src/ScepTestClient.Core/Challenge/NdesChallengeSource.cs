@@ -55,10 +55,19 @@ public sealed class NdesChallengeSource : IChallengeSource {
     }
 
     // NDES renders the challenge as a bold 8/16/32 hex run near "enrollment challenge password".
+    // Anchor to the label first so decoy hex tokens earlier in the page are not mistaken for it;
+    // fall back to the first hex run when no label is present.
     private static string Scrape(string html) {
+        string source;
+        Match anchored;
         Match m;
 
-        m = Regex.Match(html ?? string.Empty, "([0-9A-Fa-f]{8,40})");
+        source = html ?? string.Empty;
+
+        anchored = Regex.Match(source, "challenge password.*?([0-9A-Fa-f]{8,40})", RegexOptions.IgnoreCase | RegexOptions.Singleline);
+        if (anchored.Success) { return anchored.Groups[1].Value; }
+
+        m = Regex.Match(source, "([0-9A-Fa-f]{8,40})");
         return m.Success ? m.Groups[1].Value : string.Empty;
     }
 }

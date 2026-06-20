@@ -17,7 +17,7 @@ public sealed class FakeHttpEndpoint : System.IAsyncDisposable {
         BaseUrl = base_url;
     }
 
-    public static async Task<FakeHttpEndpoint> StartAsync(string challenge) {
+    public static async Task<FakeHttpEndpoint> StartAsync(string challenge, string? admin_html = null) {
         WebApplicationBuilder builder;
         WebApplication app;
         System.Uri url;
@@ -35,7 +35,7 @@ public sealed class FakeHttpEndpoint : System.IAsyncDisposable {
                 ctx.Response.StatusCode = 401;
                 return;
             }
-            await ctx.Response.WriteAsync($"<html><body>enrollment challenge password is <b>{challenge}</b></body></html>");
+            await ctx.Response.WriteAsync(admin_html ?? $"<html><body>enrollment challenge password is <b>{challenge}</b></body></html>");
         });
 
         await app.StartAsync();

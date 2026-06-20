@@ -61,4 +61,26 @@ public sealed class ChallengeSourceTests {
             await endpoint.DisposeAsync();
         }
     }
+
+    [Fact]
+    public async Task Ndes_AnchorsToLabel_IgnoringDecoyHex() {
+        FakeHttpEndpoint endpoint;
+        NdesChallengeSource source;
+        HttpClient http;
+        ScepResult<string> result;
+        string admin_html;
+
+        admin_html = "<p>thumbprint AABBCCDDEEFF0011</p><p>The enrollment challenge password is: <B>DEADBEEFCAFE1234</B></p>";
+
+        http = new HttpClient();
+        endpoint = await FakeHttpEndpoint.StartAsync("DEADBEEFCAFE1234", admin_html);
+        try {
+            source = new NdesChallengeSource(http, endpoint.BaseUrl + "certsrv/mscep_admin/", "ndesadmin", "pw");
+            result = await source.GetAsync();
+            Assert.True(result.IsOk, result.Error);
+            Assert.Equal("DEADBEEFCAFE1234", result.Value);
+        } finally {
+            await endpoint.DisposeAsync();
+        }
+    }
 }
