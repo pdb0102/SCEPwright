@@ -17,7 +17,7 @@ internal static class CryptoCommand {
         }
         verb = args[1];
 
-        if (ScepCrypto.Load(null, out crypto, out error) != ScepClientResult.Ok) {
+        if (ScepCrypto.Load(CommandRouter.ResolveProviderPath(args, data_root), out crypto, out error) != ScepClientResult.Ok) {
             output.WriteLine($"crypto load error: {error}");
             return 1;
         }

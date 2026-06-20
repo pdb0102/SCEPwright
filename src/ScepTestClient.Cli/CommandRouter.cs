@@ -130,7 +130,7 @@ public static class CommandRouter {
 
         if (args.Length < 3) { output.WriteLine("usage: servers suggest <id>"); return 2; }
         server_id = args[2];
-        if (!BuildClient(server_id, data_root, output, out client, out stored)) { return 1; }
+        if (!BuildClient(args, server_id, data_root, output, out client, out stored)) { return 1; }
         caps = client.GetCaCaps().Value ?? ScepCapabilities.Parse(string.Empty);
         lines = ScepTestClient.Core.Testing.ServerSuggest.For(server_id, caps, client.Crypto.Capabilities);
         foreach (string line in lines) { output.WriteLine(line); }
@@ -257,7 +257,7 @@ public static class CommandRouter {
             return 2;
         }
 
-        load_result = ScepCrypto.Load(null, out crypto, out crypto_error);
+        load_result = ScepCrypto.Load(ResolveProviderPath(args, data_root), out crypto, out crypto_error);
         if (load_result != ScepClientResult.Ok) {
             output.WriteLine($"crypto load error: {crypto_error}");
             return 1;
@@ -362,7 +362,7 @@ public static class CommandRouter {
             output.WriteLine($"challenge: {Redaction.Hash(challenge)}");
         }
 
-        load_result = ScepCrypto.Load(null, out crypto, out crypto_error);
+        load_result = ScepCrypto.Load(ResolveProviderPath(args, data_root), out crypto, out crypto_error);
         if (load_result != ScepClientResult.Ok) {
             output.WriteLine($"crypto load error: {crypto_error}");
             return 1;
@@ -436,7 +436,7 @@ public static class CommandRouter {
     // Phase-2 operations: getcacert, getnextcacert, renew, getcert, getcrl, poll
     // -------------------------------------------------------------------------
 
-    private static bool BuildClient(string server_id, string data_root, TextWriter output, out ScepClient client, out StoredServer stored) {
+    private static bool BuildClient(string[] args, string server_id, string data_root, TextWriter output, out ScepClient client, out StoredServer stored) {
         ServerRegistry registry;
         StoredServer? found;
         IScepCrypto crypto;
@@ -455,7 +455,7 @@ public static class CommandRouter {
         }
         stored = found;
 
-        if (ScepCrypto.Load(null, out crypto, out crypto_error) != ScepClientResult.Ok) {
+        if (ScepCrypto.Load(ResolveProviderPath(args, data_root), out crypto, out crypto_error) != ScepClientResult.Ok) {
             output.WriteLine($"crypto load error: {crypto_error}");
             return false;
         }
@@ -480,7 +480,7 @@ public static class CommandRouter {
         ScepResult<System.Collections.Generic.IReadOnlyList<System.Security.Cryptography.X509Certificates.X509Certificate2>> result;
 
         if (args.Length < 2) { output.WriteLine("usage: getcacert <serverId>"); return 2; }
-        if (!BuildClient(args[1], data_root, output, out client, out stored)) { return 2; }
+        if (!BuildClient(args, args[1], data_root, output, out client, out stored)) { return 2; }
 
         result = client.GetCaCert();
         if (!result.IsOk) { output.WriteLine($"getcacert failed: {result.Status} {result.Error}"); return 1; }
@@ -496,7 +496,7 @@ public static class CommandRouter {
         ScepResult<System.Collections.Generic.IReadOnlyList<System.Security.Cryptography.X509Certificates.X509Certificate2>> result;
 
         if (args.Length < 2) { output.WriteLine("usage: getnextcacert <serverId>"); return 2; }
-        if (!BuildClient(args[1], data_root, output, out client, out stored)) { return 2; }
+        if (!BuildClient(args, args[1], data_root, output, out client, out stored)) { return 2; }
 
         result = client.GetNextCaCert();
         if (!result.IsOk) { output.WriteLine($"getnextcacert failed: {result.Status} {result.Error}"); return 1; }
@@ -530,7 +530,7 @@ public static class CommandRouter {
         server_id = store.FindServerForCert(cert_id);
         if (server_id is null) { output.WriteLine($"no stored certificate '{cert_id}'"); return 2; }
 
-        if (!BuildClient(server_id, data_root, output, out client, out stored)) { return 2; }
+        if (!BuildClient(args, server_id, data_root, output, out client, out stored)) { return 2; }
 
         if (variant == RenewalVariant.Proper) {
             result = client.RenewCertificate(cert_id, store, new UseRecordLog(data_root));
@@ -588,7 +588,7 @@ public static class CommandRouter {
         issuer = Opt(args, "--issuer");
         serial = Opt(args, "--serial");
         if (string.IsNullOrWhiteSpace(issuer) || string.IsNullOrWhiteSpace(serial)) { output.WriteLine("--issuer and --serial are required"); return 2; }
-        if (!BuildClient(args[1], data_root, output, out client, out stored)) { return 2; }
+        if (!BuildClient(args, args[1], data_root, output, out client, out stored)) { return 2; }
 
         result = client.GetCert(issuer!, serial!);
         if (!result.IsOk) { output.WriteLine($"getcert failed: {result.Status} {result.Error}"); return 1; }
@@ -607,7 +607,7 @@ public static class CommandRouter {
         issuer = Opt(args, "--issuer");
         serial = Opt(args, "--serial");
         if (string.IsNullOrWhiteSpace(issuer) || string.IsNullOrWhiteSpace(serial)) { output.WriteLine("--issuer and --serial are required"); return 2; }
-        if (!BuildClient(args[1], data_root, output, out client, out stored)) { return 2; }
+        if (!BuildClient(args, args[1], data_root, output, out client, out stored)) { return 2; }
 
         result = client.GetCrl(issuer!, serial!);
         if (!result.IsOk) { output.WriteLine($"getcrl failed: {result.Status} {result.Error}"); return 1; }
@@ -628,7 +628,7 @@ public static class CommandRouter {
         subject = Opt(args, "--subject");
         txn = Opt(args, "--txn");
         if (string.IsNullOrWhiteSpace(issuer) || string.IsNullOrWhiteSpace(subject) || string.IsNullOrWhiteSpace(txn)) { output.WriteLine("--issuer, --subject and --txn are required"); return 2; }
-        if (!BuildClient(args[1], data_root, output, out client, out stored)) { return 2; }
+        if (!BuildClient(args, args[1], data_root, output, out client, out stored)) { return 2; }
 
         result = client.Poll(issuer!, subject!, txn!);
         if (result.IsOk && result.Value.Certificate is not null) {
@@ -656,7 +656,7 @@ public static class CommandRouter {
         verb = args[1];
         server_id = args[2];
 
-        if (!BuildClient(server_id, data_root, output, out client, out stored)) { return 1; }
+        if (!BuildClient(args, server_id, data_root, output, out client, out stored)) { return 1; }
         engine = new ScepTestClient.Core.Testing.TestEngine();
 
         switch (verb) {
@@ -807,7 +807,7 @@ public static class CommandRouter {
         if (!File.Exists(path)) { output.WriteLine($"scenario not found: {path}"); return 2; }
         json = File.ReadAllText(path);
         if (!ScepTestClient.Core.Testing.ScenarioRunner.Parse(json, out scenario, out parse_error)) { output.WriteLine($"bad scenario: {parse_error}"); return 2; }
-        if (!BuildClient(server_id, data_root, output, out client, out stored)) { return 1; }
+        if (!BuildClient(args, server_id, data_root, output, out client, out stored)) { return 1; }
 
         ca = client.GetCaCert();
         if (!ca.IsOk) { output.WriteLine($"GetCACert failed: {ca.Status} {ca.Error}"); return 1; }
@@ -935,11 +935,34 @@ public static class CommandRouter {
     }
 
     // -------------------------------------------------------------------------
-    // config show
+    // config set / show
     // -------------------------------------------------------------------------
 
     private static int RunConfig(string[] args, string data_root, TextWriter output) {
         ClientConfig config;
+
+        if (args.Length >= 4 && args[1] == "set") {
+            string key;
+            string value;
+            int bits;
+
+            config = ClientConfig.Load(data_root);
+            key = args[2];
+            value = args[3];
+
+            switch (key) {
+                case "crypto-provider": config.CryptoProviderPath = value; break;
+                case "key-spec": config.KeySpec = value; break;
+                case "min-rsa-bits":
+                    if (int.TryParse(value, out bits)) { config.MinRsaKeyBits = bits; }
+                    break;
+                default: output.WriteLine($"unknown config key '{key}'"); return 2;
+            }
+
+            config.Save(data_root);
+            output.WriteLine($"set {key} = {value}");
+            return 0;
+        }
 
         if (args.Length < 2 || args[1] != "show") {
             return WriteUsage(output);
@@ -977,6 +1000,7 @@ public static class CommandRouter {
         output.WriteLine("  test <lifecycle|full|probe> <serverId> [--report-format junit|trx|json|md] [--jamf-max-wait <ms>]");
         output.WriteLine("  run <scenario.json> <serverId> [--report-format junit|trx|json|md]");
         output.WriteLine("  config show");
+        output.WriteLine("  config set <key> <value>   (keys: crypto-provider, key-spec, min-rsa-bits)");
         output.WriteLine("  crypto info");
         output.WriteLine("  crypto list");
         return 2;
@@ -985,6 +1009,17 @@ public static class CommandRouter {
     // -------------------------------------------------------------------------
     // Option helpers
     // -------------------------------------------------------------------------
+
+    internal static string? ResolveProviderPath(string[] args, string data_root) {
+        string? flag;
+        ClientConfig config;
+
+        flag = Opt(args, "--crypto-provider");
+        if (!string.IsNullOrWhiteSpace(flag)) { return flag; }
+
+        config = ClientConfig.Load(data_root);
+        return config.CryptoProviderPath;
+    }
 
     private static string? Opt(string[] args, string name) {
         int i;
