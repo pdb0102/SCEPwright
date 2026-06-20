@@ -1,0 +1,81 @@
+{
+  "planPath": "docs/superpowers/plans/2026-06-20-scep-test-client-phase-2.md",
+  "tasks": [
+    {
+      "id": 1,
+      "subject": "Task 1: Generalized PKI-operation encode + RenewalReq (17)",
+      "status": "completed",
+      "description": "**Goal:** Refactor the BC encoder so it can stamp any SCEP messageType over any enveloped payload, and make EncodePkiMessage accept RenewalReq.\n\n**Verify:** dotnet test tests/ScepTestClient.Tests --filter \"BcRenewalEncodeTests|BcEncodeTests\"\n\n```json:metadata\n{\"files\": [\"src/ScepTestClient.Crypto.BouncyCastle/ScepAttributes.cs\", \"src/ScepTestClient.Crypto.BouncyCastle/BcPkiMessage.cs\", \"src/ScepTestClient.Crypto.BouncyCastle/BouncyCastleScepCrypto.cs\", \"tests/ScepTestClient.Tests/BcRenewalEncodeTests.cs\"], \"verifyCommand\": \"dotnet test tests/ScepTestClient.Tests --filter \\\"BcRenewalEncodeTests|BcEncodeTests\\\"\", \"acceptanceCriteria\": [\"RenewalReq encodes with messageType 17 and EnvelopedData content\", \"existing PKCSReq encode still passes\", \"NumberFor maps all six message types\"], \"modelTier\": \"standard\"}\n```"
+    },
+    {
+      "id": 2,
+      "subject": "Task 2: GetCert (21) & GetCRL (22) encode + IssuerAndSerial on PkiMessage",
+      "status": "completed",
+      "blockedBy": [1],
+      "description": "**Goal:** Carry an issuer/serial on PkiMessage and encode GetCert/GetCRL as an IssuerAndSerialNumber enveloped to the CA and signed.\n\n**Verify:** dotnet test tests/ScepTestClient.Tests --filter BcGetCertCrlEncodeTests\n\n```json:metadata\n{\"files\": [\"src/ScepTestClient.CryptoApi/PkiMessage.cs\", \"src/ScepTestClient.Crypto.BouncyCastle/BcPkiMessage.cs\", \"src/ScepTestClient.Crypto.BouncyCastle/BouncyCastleScepCrypto.cs\", \"tests/ScepTestClient.Tests/BcGetCertCrlEncodeTests.cs\"], \"verifyCommand\": \"dotnet test tests/ScepTestClient.Tests --filter BcGetCertCrlEncodeTests\", \"acceptanceCriteria\": [\"GetCert encodes messageType 21\", \"GetCrl encodes messageType 22\", \"inner IssuerAndSerialNumber serial round-trips\"], \"modelTier\": \"standard\"}\n```"
+    },
+    {
+      "id": 3,
+      "subject": "Task 3: GetCRL response decode (CRL extraction) + TestCa CRL helpers",
+      "status": "completed",
+      "blockedBy": [2],
+      "description": "**Goal:** Decode a CertRep whose enveloped degenerate PKCS#7 carries a CRL, populating PkiMessage.IssuedCrls. Add the test CA's CRL helpers + a shared EnvelopeAndSign refactor.\n\n**Verify:** dotnet test tests/ScepTestClient.Tests --filter \"BcCrlDecodeTests|BcDecodeTests\"\n\n```json:metadata\n{\"files\": [\"src/ScepTestClient.Crypto.BouncyCastle/BcPkiMessage.cs\", \"tests/ScepTestClient.Tests/Fakes/TestCa.cs\", \"tests/ScepTestClient.Tests/BcCrlDecodeTests.cs\"], \"verifyCommand\": \"dotnet test tests/ScepTestClient.Tests --filter \\\"BcCrlDecodeTests|BcDecodeTests\\\"\", \"acceptanceCriteria\": [\"CRL extracted from CertRep into IssuedCrls\", \"existing cert CertRep decode still passes\"], \"modelTier\": \"standard\"}\n```"
+    },
+    {
+      "id": 4,
+      "subject": "Task 4: ScepRequestBuilder fluent API",
+      "status": "completed",
+      "blockedBy": [1],
+      "description": "**Goal:** A fluent composer that builds a ready-to-encode PkiMessage for any operation, generating the subject/transient key from a KeySpec and surfacing it.\n\n**Verify:** dotnet test tests/ScepTestClient.Tests --filter ScepRequestBuilderTests\n\n```json:metadata\n{\"files\": [\"src/ScepTestClient.Core/ScepRequestBuilder.cs\", \"tests/ScepTestClient.Tests/ScepRequestBuilderTests.cs\"], \"verifyCommand\": \"dotnet test tests/ScepTestClient.Tests --filter ScepRequestBuilderTests\", \"acceptanceCriteria\": [\"PKCSReq build populates CSR + algos + key\", \"RenewalReq build wires signer cert/key\", \"GetCert build sets issuer/serial transient signer\", \"invalid build returns false+error\"], \"modelTier\": \"standard\"}\n```"
+    },
+    {
+      "id": 5,
+      "subject": "Task 5: ScepClient.Renew — the 5 renewal variants (sync+async)",
+      "status": "completed",
+      "blockedBy": [1, 4],
+      "description": "**Goal:** Unify the send/decode path into one SendPkiOperation, add SubjectKey to EnrollOutcome, and add Renew(RenewRequest) covering all five variants. Route the fake server POST by message type and enforce signer-cert validity.\n\n**Verify:** dotnet test tests/ScepTestClient.Tests --filter \"RenewalTests|EndToEndTests\"\n\n```json:metadata\n{\"files\": [\"src/ScepTestClient.Core/RenewalVariant.cs\", \"src/ScepTestClient.Core/RenewRequest.cs\", \"src/ScepTestClient.Core/EnrollOutcome.cs\", \"src/ScepTestClient.Core/ScepClient.cs\", \"tests/ScepTestClient.Tests/Fakes/TestCa.cs\", \"tests/ScepTestClient.Tests/Fakes/FakeScepServer.cs\", \"tests/ScepTestClient.Tests/RenewalTests.cs\"], \"verifyCommand\": \"dotnet test tests/ScepTestClient.Tests --filter \\\"RenewalTests|EndToEndTests\\\"\", \"acceptanceCriteria\": [\"4 success variants return a cert\", \"Expired variant rejected with BadRequest\", \"SameKey reuses existing key\", \"enroll tests still pass post-refactor\"], \"modelTier\": \"standard\"}\n```"
+    },
+    {
+      "id": 6,
+      "subject": "Task 6: ScepClient.GetCert (21) & GetCrl (22) (sync+async)",
+      "status": "completed",
+      "blockedBy": [2, 3, 4],
+      "description": "**Goal:** Retrieve an existing certificate by issuer+serial and fetch a CRL end-to-end, with the fake CA handling both. Includes SendDecoded* and a ResolveCaCert cache.\n\n**Verify:** dotnet test tests/ScepTestClient.Tests --filter GetCertCrlTests\n\n```json:metadata\n{\"files\": [\"src/ScepTestClient.Core/ScepClient.cs\", \"tests/ScepTestClient.Tests/Fakes/TestCa.cs\", \"tests/ScepTestClient.Tests/GetCertCrlTests.cs\"], \"verifyCommand\": \"dotnet test tests/ScepTestClient.Tests --filter GetCertCrlTests\", \"acceptanceCriteria\": [\"GetCert returns previously issued cert\", \"GetCrl returns parseable CRL\", \"unknown serial yields ServerFailure\", \"sync+async both present\"], \"modelTier\": \"standard\"}\n```"
+    },
+    {
+      "id": 7,
+      "subject": "Task 7: Standalone ScepClient.Poll — CertPoll (20) (sync+async)",
+      "status": "completed",
+      "blockedBy": [1, 4],
+      "description": "**Goal:** Encode CertPoll (IssuerAndSubject payload), add Poll/PollAsync, and let the fake CA satisfy a poll by issuing for the polled subject.\n\n**Verify:** dotnet test tests/ScepTestClient.Tests --filter PollTests\n\n```json:metadata\n{\"files\": [\"src/ScepTestClient.Crypto.BouncyCastle/BcPkiMessage.cs\", \"src/ScepTestClient.Crypto.BouncyCastle/BouncyCastleScepCrypto.cs\", \"src/ScepTestClient.Core/ScepClient.cs\", \"tests/ScepTestClient.Tests/Fakes/TestCa.cs\", \"tests/ScepTestClient.Tests/PollTests.cs\"], \"verifyCommand\": \"dotnet test tests/ScepTestClient.Tests --filter PollTests\", \"acceptanceCriteria\": [\"CertPoll encodes messageType 20 + IssuerAndSubject\", \"Poll returns a cert for the subject\", \"supplied txn is stamped\"], \"modelTier\": \"standard\"}\n```"
+    },
+    {
+      "id": 8,
+      "subject": "Task 8: Key import + CertStore lineage & Load",
+      "status": "completed",
+      "description": "**Goal:** Let a stored cert sign its own renewal: import a PKCS#8 private key back into an IScepKey, persist renewedFrom/transactionId/status, expose a core Save overload + Load/FindServerForCert.\n\n**Verify:** dotnet test tests/ScepTestClient.Tests --filter \"KeyImportTests|CertStoreLineageTests\"\n\n```json:metadata\n{\"files\": [\"src/ScepTestClient.CryptoApi/IScepCrypto.cs\", \"src/ScepTestClient.Crypto.BouncyCastle/BouncyCastleScepCrypto.cs\", \"src/ScepTestClient.Core/Storage/CertStore.cs\", \"tests/ScepTestClient.Tests/KeyImportTests.cs\", \"tests/ScepTestClient.Tests/CertStoreLineageTests.cs\"], \"verifyCommand\": \"dotnet test tests/ScepTestClient.Tests --filter \\\"KeyImportTests|CertStoreLineageTests\\\"\", \"acceptanceCriteria\": [\"PKCS#8 export/import round-trips\", \"lineage fields persisted\", \"Load + FindServerForCert work\", \"Phase-1 Save overload unchanged\"], \"modelTier\": \"standard\"}\n```"
+    },
+    {
+      "id": 9,
+      "subject": "Task 9: Create(existingCert) factory + high-level RenewCertificate orchestration",
+      "status": "completed",
+      "blockedBy": [5, 8],
+      "description": "**Goal:** Seed a renewal context from an existing cert/key and add the casual renew <cert-id> flow: load, fetch CA cert, renew variant Proper, store with renewedFrom.\n\n**Verify:** dotnet test tests/ScepTestClient.Tests --filter RenewLifecycleTests\n\n```json:metadata\n{\"files\": [\"src/ScepTestClient.Core/ScepClient.cs\", \"tests/ScepTestClient.Tests/RenewLifecycleTests.cs\"], \"verifyCommand\": \"dotnet test tests/ScepTestClient.Tests --filter RenewLifecycleTests\", \"acceptanceCriteria\": [\"Create(existingCert) seeds renewal context\", \"RenewCertificate chains RenewedFrom lineage\", \"failed renew writes no new cert dir\"], \"modelTier\": \"standard\"}\n```"
+    },
+    {
+      "id": 10,
+      "subject": "Task 10: Encrypted PKCS#8 key storage (--encrypt-keys)",
+      "status": "completed",
+      "blockedBy": [8],
+      "description": "**Goal:** Add passphrase-encrypted PKCS#8 export/import to the provider and let CertStore write/read key.pkcs8.enc when a passphrase is supplied.\n\n**Verify:** dotnet test tests/ScepTestClient.Tests --filter EncryptedKeyTests\n\n```json:metadata\n{\"files\": [\"src/ScepTestClient.CryptoApi/IScepCrypto.cs\", \"src/ScepTestClient.Crypto.BouncyCastle/BouncyCastleScepCrypto.cs\", \"src/ScepTestClient.Core/Storage/CertStore.cs\", \"tests/ScepTestClient.Tests/EncryptedKeyTests.cs\"], \"verifyCommand\": \"dotnet test tests/ScepTestClient.Tests --filter EncryptedKeyTests\", \"acceptanceCriteria\": [\"encrypted PKCS#8 round-trips\", \"wrong passphrase returns false no throw\", \"Save writes .enc not plaintext; Load reads it\", \"default plaintext unchanged\"], \"modelTier\": \"standard\"}\n```"
+    },
+    {
+      "id": 11,
+      "subject": "Task 11: CLI wiring — getcacert/enroll/renew/getcert/getcrl/poll + --encrypt-keys",
+      "status": "completed",
+      "blockedBy": [5, 6, 7, 9, 10],
+      "description": "**Goal:** Expose the Phase-2 operations on the sceptest CLI and fill remaining per-op gaps, with usage + an end-to-end routing test. Final full build + test sweep.\n\n**Verify:** dotnet test tests/ScepTestClient.Tests --filter CliRouterPhase2Tests; then dotnet build IntuneSimulator.sln -c Debug; then dotnet test IntuneSimulator.sln\n\n```json:metadata\n{\"files\": [\"src/ScepTestClient.Cli/CommandRouter.cs\", \"tests/ScepTestClient.Tests/CliRouterPhase2Tests.cs\"], \"verifyCommand\": \"dotnet test tests/ScepTestClient.Tests --filter CliRouterPhase2Tests && dotnet build IntuneSimulator.sln -c Debug && dotnet test IntuneSimulator.sln\", \"acceptanceCriteria\": [\"all 7 new commands route\", \"renew finds server + prints new cert id\", \"getcert/getcrl arg validation\", \"usage lists new commands\", \"end-to-end get+renew exits 0\", \"full solution build+test green 0 warnings\"], \"modelTier\": \"standard\"}\n```"
+    }
+  ],
+  "lastUpdated": "2026-06-20"
+}

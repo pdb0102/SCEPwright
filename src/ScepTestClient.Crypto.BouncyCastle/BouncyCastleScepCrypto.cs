@@ -64,43 +64,63 @@ public sealed class BouncyCastleScepCrypto : IScepCrypto {
     }
     public bool EncodePkiMessage(PkiMessage message, FaultDirectives? faults, out byte[] der, out string error) {
         // faults: Phase-1 no-op stub; fault injection is wired up in Phase 3.
-        BcKey signer_key;
         byte[] csr_der;
 
         der = System.Array.Empty<byte>();
         error = string.Empty;
 
-        if (message.MessageType != MessageType.PkcsReq) {
-            error = $"unsupported message type: {message.MessageType}";
-            return false;
-        }
-
-        if (message.SignerKey is not BcKey bc_signer_key) {
+        if (message.SignerKey is not BcKey signer_key) {
             error = "SignerKey was not produced by this provider";
             return false;
         }
 
-        if (message.InnerCsr == null) {
-            error = "InnerCsr must be set for PKCSReq";
-            return false;
-        }
-
         if (message.RecipientCaCert == null) {
-            error = "RecipientCaCert must be set for PKCSReq";
-            return false;
-        }
-
-        signer_key = bc_signer_key;
-
-        if (!EncodeCsr(message.InnerCsr, out csr_der, out error)) {
+            error = "RecipientCaCert must be set";
             return false;
         }
 
         try {
-            der = BcPkiMessage.EncodePkcsReq(message, csr_der, signer_key);
-            return true;
+            switch (message.MessageType) {
+                case MessageType.PkcsReq:
+                case MessageType.RenewalReq:
+                    if (message.InnerCsr == null) {
+                        error = $"InnerCsr must be set for {message.MessageType}";
+                        return false;
+                    }
+                    if (!EncodeCsr(message.InnerCsr, out csr_der, out error)) {
+                        return false;
+                    }
+                    der = BcPkiMessage.EncodePkiOperation(message, csr_der, signer_key, ScepAttributes.NumberFor(message.MessageType));
+                    return true;
+                case MessageType.GetCert:
+                case MessageType.GetCrl:
+                    if (string.IsNullOrEmpty(message.IssuerName) || string.IsNullOrEmpty(message.SerialNumber)) {
+                        error = $"IssuerName and SerialNumber must be set for {message.MessageType}";
+                        return false;
+                    }
+                    der = BcPkiMessage.EncodePkiOperation(
+                        message,
+                        BcPkiMessage.BuildIssuerAndSerial(message.IssuerName!, message.SerialNumber!),
+                        signer_key,
+                        ScepAttributes.NumberFor(message.MessageType));
+                    return true;
+                case MessageType.CertPoll:
+                    if (string.IsNullOrEmpty(message.IssuerName) || string.IsNullOrEmpty(message.SubjectName)) {
+                        error = "IssuerName and SubjectName must be set for CertPoll";
+                        return false;
+                    }
+                    der = BcPkiMessage.EncodePkiOperation(
+                        message,
+                        BcPkiMessage.BuildIssuerAndSubject(message.IssuerName!, message.SubjectName!),
+                        signer_key,
+                        ScepAttributes.NumberFor(message.MessageType));
+                    return true;
+                default:
+                    error = $"unsupported message type: {message.MessageType}";
+                    return false;
+            }
         } catch (System.Exception ex) {
-            error = $"PKCSReq encode failed: {ex.Message}";
+            error = $"{message.MessageType} encode failed: {ex.Message}";
             return false;
         }
     }
@@ -137,6 +157,79 @@ public sealed class BouncyCastleScepCrypto : IScepCrypto {
             return true;
         } catch (System.Exception ex) {
             error = $"ExportPrivateKeyPkcs8 failed: {ex.Message}";
+            return false;
+        }
+    }
+
+    public bool ImportPrivateKeyPkcs8(byte[] der, out IScepKey key, out string error) {
+        Org.BouncyCastle.Crypto.AsymmetricKeyParameter priv;
+        Org.BouncyCastle.Crypto.Parameters.RsaPrivateCrtKeyParameters rsa_priv;
+        Org.BouncyCastle.Crypto.Parameters.RsaKeyParameters pub;
+        Org.BouncyCastle.Crypto.AsymmetricCipherKeyPair pair;
+
+        key = null!;
+        error = string.Empty;
+
+        try {
+            priv = Org.BouncyCastle.Security.PrivateKeyFactory.CreateKey(der);
+            if (priv is not Org.BouncyCastle.Crypto.Parameters.RsaPrivateCrtKeyParameters crt) {
+                error = "only RSA PKCS#8 keys are supported by this provider";
+                return false;
+            }
+            rsa_priv = crt;
+            pub = new Org.BouncyCastle.Crypto.Parameters.RsaKeyParameters(false, rsa_priv.Modulus, rsa_priv.PublicExponent);
+            pair = new Org.BouncyCastle.Crypto.AsymmetricCipherKeyPair(pub, priv);
+            key = new BcKey(pair, BcAlgorithms.Rsa, rsa_priv.Modulus.BitLength);
+            return true;
+        } catch (System.Exception ex) {
+            error = $"ImportPrivateKeyPkcs8 failed: {ex.Message}";
+            return false;
+        }
+    }
+
+    public bool ExportPrivateKeyPkcs8Encrypted(IScepKey key, string passphrase, out byte[] der, out string error) {
+        Org.BouncyCastle.OpenSsl.Pkcs8Generator generator;
+        Org.BouncyCastle.Utilities.IO.Pem.PemObject pem;
+
+        der = System.Array.Empty<byte>();
+        error = string.Empty;
+
+        if (key is not BcKey bc_key) {
+            error = "key was not produced by this provider";
+            return false;
+        }
+
+        try {
+            generator = new Org.BouncyCastle.OpenSsl.Pkcs8Generator(
+                bc_key.KeyPair.Private,
+                Org.BouncyCastle.OpenSsl.Pkcs8Generator.PbeSha1_3DES);
+            generator.Password = passphrase.ToCharArray();
+            generator.SecureRandom = _random;
+            pem = generator.Generate();
+            der = pem.Content;
+            return true;
+        } catch (System.Exception ex) {
+            error = $"ExportPrivateKeyPkcs8Encrypted failed: {ex.Message}";
+            return false;
+        }
+    }
+
+    public bool ImportPrivateKeyPkcs8Encrypted(byte[] der, string passphrase, out IScepKey key, out string error) {
+        Org.BouncyCastle.Asn1.Pkcs.EncryptedPrivateKeyInfo enc_info;
+        Org.BouncyCastle.Crypto.AsymmetricKeyParameter priv;
+        byte[] plain_der;
+
+        key = null!;
+        error = string.Empty;
+
+        try {
+            enc_info = Org.BouncyCastle.Asn1.Pkcs.EncryptedPrivateKeyInfo.GetInstance(
+                Org.BouncyCastle.Asn1.Asn1Object.FromByteArray(der));
+            priv = Org.BouncyCastle.Security.PrivateKeyFactory.DecryptKey(passphrase.ToCharArray(), enc_info);
+            plain_der = Org.BouncyCastle.Pkcs.PrivateKeyInfoFactory.CreatePrivateKeyInfo(priv).GetDerEncoded();
+            return ImportPrivateKeyPkcs8(plain_der, out key, out error);
+        } catch (System.Exception ex) {
+            error = $"ImportPrivateKeyPkcs8Encrypted failed: {ex.Message}";
             return false;
         }
     }

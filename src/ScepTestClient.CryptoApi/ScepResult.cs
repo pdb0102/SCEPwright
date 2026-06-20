@@ -17,4 +17,7 @@ public readonly struct ScepResult<T> {
 
     public static ScepResult<T> Fail(ScepClientResult status, string error) =>
         new(status, default!, error);
+
+    public static ScepResult<T> Fail(ScepClientResult status, T value, string error) =>
+        new(status, value, error);
 }

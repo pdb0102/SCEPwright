@@ -12,4 +12,8 @@
     <ProjectReference Include="..\ScepTestClient.CryptoApi\ScepTestClient.CryptoApi.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="ScepTestClient.Tests" />
+  </ItemGroup>
+
 </Project>

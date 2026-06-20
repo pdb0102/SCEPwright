@@ -25,4 +25,10 @@ public interface IScepCrypto {
     bool ParseCaCertificates(byte[] der, out IReadOnlyList<X509Certificate2> certs, out string error);
 
     bool ExportPrivateKeyPkcs8(IScepKey key, out byte[] der, out string error);
+
+    bool ImportPrivateKeyPkcs8(byte[] der, out IScepKey key, out string error);
+
+    bool ExportPrivateKeyPkcs8Encrypted(IScepKey key, string passphrase, out byte[] der, out string error);
+
+    bool ImportPrivateKeyPkcs8Encrypted(byte[] der, string passphrase, out IScepKey key, out string error);
 }

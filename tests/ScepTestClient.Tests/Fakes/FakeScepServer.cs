@@ -43,14 +43,21 @@ public sealed class FakeScepServer : IAsyncDisposable {
         app.MapPost("/scep", async (HttpContext ctx) => {
             MemoryStream ms;
             byte[] request_der;
-            byte[] cert_rep;
+            byte[] response;
+            string message_type;
 
             ms = new MemoryStream();
             await ctx.Request.Body.CopyToAsync(ms);
             request_der = ms.ToArray();
-            cert_rep = ca.HandlePkiOperation(request_der);
+            message_type = ca.PeekMessageType(request_der);
+
+            if (message_type == "21") { response = ca.HandleGetCert(request_der); }
+            else if (message_type == "22") { response = ca.HandleGetCrl(request_der); }
+            else if (message_type == "20") { response = ca.HandlePoll(request_der); }
+            else { response = ca.HandlePkiOperation(request_der); }
+
             ctx.Response.ContentType = "application/x-pki-message";
-            await ctx.Response.Body.WriteAsync(cert_rep);
+            await ctx.Response.Body.WriteAsync(response);
         });
 
         await app.StartAsync();

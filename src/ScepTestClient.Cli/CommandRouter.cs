@@ -42,6 +42,27 @@ public static class CommandRouter {
             case "get":
                 return RunGet(args, data_root, output);
 
+            case "getcacert":
+                return RunGetCaCert(args, data_root, output);
+
+            case "getnextcacert":
+                return RunGetNextCaCert(args, data_root, output);
+
+            case "enroll":
+                return RunGet(args, data_root, output);   // enroll == get without lifecycle sugar; same options
+
+            case "renew":
+                return RunRenew(args, data_root, output);
+
+            case "getcert":
+                return RunGetCert(args, data_root, output);
+
+            case "getcrl":
+                return RunGetCrl(args, data_root, output);
+
+            case "poll":
+                return RunPoll(args, data_root, output);
+
             case "certs":
                 return RunCerts(args, data_root, output);
 
@@ -233,6 +254,8 @@ public static class CommandRouter {
         string? key_spec_str;
         string? sid;
         int verbosity;
+        bool encrypt_keys;
+        string? key_pass;
         ServerRegistry registry;
         StoredServer? stored;
         IScepCrypto crypto;
@@ -261,9 +284,16 @@ public static class CommandRouter {
         key_spec_str = Opt(args, "--key-spec") ?? "rsa:2048";
         sid = Opt(args, "--sid");
         verbosity = CountFlag(args, "-v");
+        encrypt_keys = HasFlag(args, "--encrypt-keys");
+        key_pass = Opt(args, "--key-pass");
 
         if (string.IsNullOrWhiteSpace(subject)) {
             output.WriteLine("--subject is required");
+            return 2;
+        }
+
+        if (encrypt_keys && string.IsNullOrEmpty(key_pass)) {
+            output.WriteLine("--encrypt-keys requires --key-pass <pw>");
             return 2;
         }
 
@@ -314,7 +344,7 @@ public static class CommandRouter {
             Sid = sid,
         };
 
-        outcome = client.GetNewCertificate(request, new CertStore(data_root), new UseRecordLog(data_root));
+        outcome = client.GetNewCertificate(request, new CertStore(data_root), new UseRecordLog(data_root), key_passphrase: encrypt_keys ? key_pass : null);
 
         if (outcome.IsOk) {
             string cert_subject;
@@ -325,6 +355,232 @@ public static class CommandRouter {
 
         output.WriteLine($"FAILED: {outcome.Status} {outcome.Error}");
         return 1;
+    }
+
+    // -------------------------------------------------------------------------
+    // Phase-2 operations: getcacert, getnextcacert, renew, getcert, getcrl, poll
+    // -------------------------------------------------------------------------
+
+    private static bool BuildClient(string server_id, string data_root, TextWriter output, out ScepClient client, out StoredServer stored) {
+        ServerRegistry registry;
+        StoredServer? found;
+        IScepCrypto crypto;
+        string crypto_error;
+        ServerConfig config;
+        string client_error;
+
+        client = null!;
+        stored = null!;
+
+        registry = new ServerRegistry(data_root);
+        found = registry.Get(server_id);
+        if (found is null) {
+            output.WriteLine($"unknown server '{server_id}'");
+            return false;
+        }
+        stored = found;
+
+        if (ScepCrypto.Load(null, out crypto, out crypto_error) != ScepClientResult.Ok) {
+            output.WriteLine($"crypto load error: {crypto_error}");
+            return false;
+        }
+
+        config = new ServerConfig {
+            Id = stored.Id,
+            Url = new Uri(stored.Url),
+            CaIdentifier = stored.CaIdentifier,
+            PreferPost = stored.PreferPost,
+        };
+
+        if (ScepClient.Create(config, crypto, null, out client, out client_error) != ScepClientResult.Ok) {
+            output.WriteLine($"client create error: {client_error}");
+            return false;
+        }
+        return true;
+    }
+
+    private static int RunGetCaCert(string[] args, string data_root, TextWriter output) {
+        ScepClient client;
+        StoredServer stored;
+        ScepResult<System.Collections.Generic.IReadOnlyList<System.Security.Cryptography.X509Certificates.X509Certificate2>> result;
+
+        if (args.Length < 2) { output.WriteLine("usage: getcacert <serverId>"); return 2; }
+        if (!BuildClient(args[1], data_root, output, out client, out stored)) { return 2; }
+
+        result = client.GetCaCert();
+        if (!result.IsOk) { output.WriteLine($"getcacert failed: {result.Status} {result.Error}"); return 1; }
+        foreach (System.Security.Cryptography.X509Certificates.X509Certificate2 c in result.Value) {
+            output.WriteLine(c.Subject);
+        }
+        return 0;
+    }
+
+    private static int RunGetNextCaCert(string[] args, string data_root, TextWriter output) {
+        ScepClient client;
+        StoredServer stored;
+        ScepResult<System.Collections.Generic.IReadOnlyList<System.Security.Cryptography.X509Certificates.X509Certificate2>> result;
+
+        if (args.Length < 2) { output.WriteLine("usage: getnextcacert <serverId>"); return 2; }
+        if (!BuildClient(args[1], data_root, output, out client, out stored)) { return 2; }
+
+        result = client.GetNextCaCert();
+        if (!result.IsOk) { output.WriteLine($"getnextcacert failed: {result.Status} {result.Error}"); return 1; }
+        foreach (System.Security.Cryptography.X509Certificates.X509Certificate2 c in result.Value) {
+            output.WriteLine(c.Subject);
+        }
+        return 0;
+    }
+
+    private static int RunRenew(string[] args, string data_root, TextWriter output) {
+        string cert_id;
+        string? variant_text;
+        string? passphrase;
+        bool encrypt;
+        CertStore store;
+        string? server_id;
+        ScepClient client;
+        StoredServer stored;
+        ScepResult<EnrollOutcome> result;
+        RenewalVariant variant;
+
+        if (args.Length < 2) { output.WriteLine("usage: renew <certId> [--variant proper|reenroll-same-subject|pkcsreq-old-cert|same-key|expired] [--encrypt-keys] [--key-pass <pw>]"); return 2; }
+
+        cert_id = args[1];
+        variant_text = Opt(args, "--variant");
+        encrypt = HasFlag(args, "--encrypt-keys");
+        passphrase = Opt(args, "--key-pass");
+        variant = ParseVariant(variant_text);
+
+        store = new CertStore(data_root);
+        server_id = store.FindServerForCert(cert_id);
+        if (server_id is null) { output.WriteLine($"no stored certificate '{cert_id}'"); return 2; }
+
+        if (!BuildClient(server_id, data_root, output, out client, out stored)) { return 2; }
+
+        if (variant == RenewalVariant.Proper) {
+            result = client.RenewCertificate(cert_id, store, new UseRecordLog(data_root));
+        } else {
+            // Non-default variant: load + renew explicitly (lineage still recorded by RenewCertificate path only for Proper).
+            result = RunRenewVariant(client, store, data_root, cert_id, variant, encrypt ? (passphrase ?? string.Empty) : null, output);
+        }
+
+        if (result.IsOk && result.Value.Certificate is not null) {
+            output.WriteLine($"renewed: {result.Value.Certificate.Subject} -> {result.Value.Certificate.Thumbprint.ToLowerInvariant()}");
+            return 0;
+        }
+        output.WriteLine($"FAILED: {result.Status} {result.Error} (failInfo {result.Value?.FailInfo})");
+        return 1;
+    }
+
+    private static ScepResult<EnrollOutcome> RunRenewVariant(ScepClient client, CertStore store, string data_root, string cert_id, RenewalVariant variant, string? passphrase, TextWriter output) {
+        System.Security.Cryptography.X509Certificates.X509Certificate2 existing_cert;
+        IScepKey existing_key;
+        CertStore.CertRecord record;
+        string load_error;
+        ScepResult<System.Collections.Generic.IReadOnlyList<System.Security.Cryptography.X509Certificates.X509Certificate2>> ca_result;
+        RenewRequest request;
+        ScepResult<EnrollOutcome> result;
+
+        if (!store.Load(client.Server.Id, cert_id, client.Crypto, out existing_cert, out existing_key, out record, out load_error)) {
+            return ScepResult<EnrollOutcome>.Fail(ScepClientResult.NotFound, load_error);
+        }
+        ca_result = client.GetCaCert();
+        if (!ca_result.IsOk) { return ScepResult<EnrollOutcome>.Fail(ca_result.Status, ca_result.Error); }
+
+        request = new RenewRequest {
+            Subject = record.Subject,
+            ExistingCertificate = existing_cert,
+            ExistingKey = existing_key,
+            Variant = variant,
+            CaCertificate = ca_result.Value[0],
+        };
+        result = client.Renew(request);
+        if (result.IsOk && result.Value.Certificate is not null && result.Value.SubjectKey is not null) {
+            store.Save(client.Server.Id, result.Value.Certificate, result.Value.SubjectKey, client.Crypto,
+                challenge_password: null, renewed_from: cert_id, transaction_id: result.Value.TransactionId, passphrase: passphrase);
+        }
+        return result;
+    }
+
+    private static int RunGetCert(string[] args, string data_root, TextWriter output) {
+        ScepClient client;
+        StoredServer stored;
+        string? issuer;
+        string? serial;
+        ScepResult<System.Security.Cryptography.X509Certificates.X509Certificate2> result;
+
+        if (args.Length < 2) { output.WriteLine("usage: getcert <serverId> --issuer <dn> --serial <hex>"); return 2; }
+        issuer = Opt(args, "--issuer");
+        serial = Opt(args, "--serial");
+        if (string.IsNullOrWhiteSpace(issuer) || string.IsNullOrWhiteSpace(serial)) { output.WriteLine("--issuer and --serial are required"); return 2; }
+        if (!BuildClient(args[1], data_root, output, out client, out stored)) { return 2; }
+
+        result = client.GetCert(issuer!, serial!);
+        if (!result.IsOk) { output.WriteLine($"getcert failed: {result.Status} {result.Error}"); return 1; }
+        output.WriteLine($"found: {result.Value.Subject} (serial {result.Value.SerialNumber})");
+        return 0;
+    }
+
+    private static int RunGetCrl(string[] args, string data_root, TextWriter output) {
+        ScepClient client;
+        StoredServer stored;
+        string? issuer;
+        string? serial;
+        ScepResult<byte[]> result;
+
+        if (args.Length < 2) { output.WriteLine("usage: getcrl <serverId> --issuer <dn> --serial <hex>"); return 2; }
+        issuer = Opt(args, "--issuer");
+        serial = Opt(args, "--serial");
+        if (string.IsNullOrWhiteSpace(issuer) || string.IsNullOrWhiteSpace(serial)) { output.WriteLine("--issuer and --serial are required"); return 2; }
+        if (!BuildClient(args[1], data_root, output, out client, out stored)) { return 2; }
+
+        result = client.GetCrl(issuer!, serial!);
+        if (!result.IsOk) { output.WriteLine($"getcrl failed: {result.Status} {result.Error}"); return 1; }
+        output.WriteLine($"CRL: {result.Value.Length} bytes");
+        return 0;
+    }
+
+    private static int RunPoll(string[] args, string data_root, TextWriter output) {
+        ScepClient client;
+        StoredServer stored;
+        string? issuer;
+        string? subject;
+        string? txn;
+        ScepResult<EnrollOutcome> result;
+
+        if (args.Length < 2) { output.WriteLine("usage: poll <serverId> --issuer <dn> --subject <dn> --txn <id>"); return 2; }
+        issuer = Opt(args, "--issuer");
+        subject = Opt(args, "--subject");
+        txn = Opt(args, "--txn");
+        if (string.IsNullOrWhiteSpace(issuer) || string.IsNullOrWhiteSpace(subject) || string.IsNullOrWhiteSpace(txn)) { output.WriteLine("--issuer, --subject and --txn are required"); return 2; }
+        if (!BuildClient(args[1], data_root, output, out client, out stored)) { return 2; }
+
+        result = client.Poll(issuer!, subject!, txn!);
+        if (result.IsOk && result.Value.Certificate is not null) {
+            output.WriteLine($"polled: {result.Value.Certificate.Subject}");
+            return 0;
+        }
+        output.WriteLine($"poll status: {result.Status} (pkiStatus {result.Value?.PkiStatus})");
+        return result.Status == ScepClientResult.Pending ? 0 : 1;
+    }
+
+    private static RenewalVariant ParseVariant(string? text) {
+        switch (text) {
+            case "reenroll-same-subject": return RenewalVariant.ReenrollSameSubject;
+            case "pkcsreq-old-cert": return RenewalVariant.RenewalShapedPkcsReq;
+            case "same-key": return RenewalVariant.SameKey;
+            case "expired": return RenewalVariant.Expired;
+            default: return RenewalVariant.Proper;
+        }
+    }
+
+    private static bool HasFlag(string[] args, string flag) {
+        int i;
+
+        for (i = 0; i < args.Length; i++) {
+            if (args[i] == flag) { return true; }
+        }
+        return false;
     }
 
     // -------------------------------------------------------------------------
@@ -414,6 +670,13 @@ public static class CommandRouter {
         output.WriteLine("  getcacaps <serverId>");
         output.WriteLine("  get <serverId> --subject \"CN=x\" [--challenge <pw>] [--key-spec rsa:2048] [--sid <s>] [-v]");
         output.WriteLine("  certs list [serverId]");
+        output.WriteLine("  getcacert <serverId>");
+        output.WriteLine("  getnextcacert <serverId>");
+        output.WriteLine("  enroll <serverId> --subject \"CN=x\" [--challenge <pw>] [--key-spec rsa:2048] [--encrypt-keys --key-pass <pw>]");
+        output.WriteLine("  renew <certId> [--variant proper|reenroll-same-subject|pkcsreq-old-cert|same-key|expired] [--encrypt-keys --key-pass <pw>]");
+        output.WriteLine("  getcert <serverId> --issuer <dn> --serial <hex>");
+        output.WriteLine("  getcrl <serverId> --issuer <dn> --serial <hex>");
+        output.WriteLine("  poll <serverId> --issuer <dn> --subject <dn> --txn <id>");
         output.WriteLine("  config show");
         return 2;
     }

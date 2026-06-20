@@ -22,6 +22,12 @@ public class DomainObjectTests {
         public bool ParseCaCertificates(byte[] der, out IReadOnlyList<X509Certificate2> certs, out string error) { certs = System.Array.Empty<X509Certificate2>(); error = string.Empty; return true; }
 
         public bool ExportPrivateKeyPkcs8(IScepKey key, out byte[] der, out string error) { der = System.Array.Empty<byte>(); error = string.Empty; return true; }
+
+        public bool ImportPrivateKeyPkcs8(byte[] der, out IScepKey key, out string error) { key = null!; error = string.Empty; return true; }
+
+        public bool ExportPrivateKeyPkcs8Encrypted(IScepKey key, string passphrase, out byte[] der, out string error) { der = System.Array.Empty<byte>(); error = string.Empty; return false; }
+
+        public bool ImportPrivateKeyPkcs8Encrypted(byte[] der, string passphrase, out IScepKey key, out string error) { key = null!; error = string.Empty; return false; }
     }
 
     [Fact]
