@@ -81,6 +81,7 @@ public sealed class TestEngine {
         ProbeDigest(report, client, caps);
         ProbePost(report, client, caps);
         ProbeGetNextCa(report, client, caps);
+        ProbePq(report, client);
 
         total.Stop();
         report.TotalElapsed = total.Elapsed;
@@ -177,7 +178,7 @@ public sealed class TestEngine {
         try {
             ca_result = ResolveCaCert(client);
             if (ca_result.IsOk) {
-                worked = SubmitEnrollWithDigest(client, ca_result.Value, "SHA-256");
+                worked = SubmitEnrollWithKeySpec(client, ca_result.Value, "rsa:2048", "SHA-256");
             }
         } catch (System.Exception) {
             worked = false;
@@ -214,7 +215,7 @@ public sealed class TestEngine {
             if (client.Server.PreferPost) {
                 ca_result = ResolveCaCert(client);
                 if (ca_result.IsOk) {
-                    worked = SubmitEnrollWithDigest(client, ca_result.Value, "SHA-256");
+                    worked = SubmitEnrollWithKeySpec(client, ca_result.Value, "rsa:2048", "SHA-256");
                 }
             }
         } catch (System.Exception) {
@@ -272,6 +273,44 @@ public sealed class TestEngine {
             worked ? PkiStatus.Success : PkiStatus.Failure, why, "RFC 8894 §4.6", sw.Elapsed));
     }
 
+    // GetCACaps has no PQ keyword, so any ML-DSA success is a FINDING (PQ-capable / under-advertised
+    // CA); a failure against a classical-only CA is the expected FAILED. Wrapped so it never throws.
+    private static void ProbePq(TestReport report, ScepClient client) {
+        Stopwatch sw;
+        bool worked;
+        CheckOutcome outcome;
+        string why;
+        ScepResult<X509Certificate2> ca_result;
+
+        if (!client.Crypto.Capabilities.PqTiers.TierA) {
+            report.Results.Add(new CheckResult("probe ML-DSA enrollment", CheckOutcome.Skipped, FailInfo.None, FailInfo.None,
+                PkiStatus.Failure, "loaded provider does not implement PQ tier A", "spec §14 (empirical PQ probe)", System.TimeSpan.Zero));
+            return;
+        }
+
+        sw = Stopwatch.StartNew();
+        worked = false;
+        try {
+            ca_result = ResolveCaCert(client);
+            if (ca_result.IsOk) {
+                worked = SubmitEnrollWithKeySpec(client, ca_result.Value, "ml-dsa:65", "SHA-256");
+            }
+        } catch (System.Exception) {
+            worked = false;
+        }
+        sw.Stop();
+
+        if (worked) {
+            outcome = CheckOutcome.Finding;
+            why = "ML-DSA enrollment succeeded though GetCACaps advertises no PQ capability (under-advertised / PQ-capable CA)";
+        } else {
+            outcome = CheckOutcome.Failed;
+            why = "ML-DSA enrollment was not accepted (expected against a classical-only CA)";
+        }
+        report.Results.Add(new CheckResult("probe ML-DSA enrollment", outcome, FailInfo.None, FailInfo.None,
+            worked ? PkiStatus.Success : PkiStatus.Failure, why, "spec §14 (empirical PQ probe)", sw.Elapsed));
+    }
+
     private static ScepResult<X509Certificate2> ResolveCaCert(ScepClient client) {
         ScepResult<System.Collections.Generic.IReadOnlyList<X509Certificate2>> result;
 
@@ -283,7 +322,7 @@ public sealed class TestEngine {
         return ScepResult<X509Certificate2>.Ok(result.Value[0]);
     }
 
-    private static bool SubmitEnrollWithDigest(ScepClient client, X509Certificate2 ca_cert, string digest) {
+    private static bool SubmitEnrollWithKeySpec(ScepClient client, X509Certificate2 ca_cert, string key_spec, string digest) {
         ScepRequestBuilder builder;
         PkiMessage message;
         IScepKey subject_key;
@@ -294,7 +333,7 @@ public sealed class TestEngine {
             .CaCertificate(ca_cert)
             .MessageType(MessageType.PkcsReq)
             .Subject("CN=probe-" + System.Guid.NewGuid().ToString("N").Substring(0, 8))
-            .KeySpec("rsa:2048")
+            .KeySpec(key_spec)
             .Digest(digest);
         if (!builder.Build(out message, out subject_key, out error)) {
             return false;
