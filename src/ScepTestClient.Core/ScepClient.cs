@@ -17,6 +17,8 @@ public sealed class ScepClient {
 
     public IScepCrypto Crypto { get; }
     public ServerConfig Server { get; }
+    public X509Certificate2? RenewalCertificate { get; private set; }
+    public IScepKey? RenewalKey { get; private set; }
     public event Action<ScepTraceEvent>? Trace;
 
     private ScepClient(ServerConfig server, IScepCrypto crypto, ScepHttpTransport transport) {
@@ -45,6 +47,24 @@ public sealed class ScepClient {
         http = handler is null ? new HttpClient() : new HttpClient(handler);
         transport = new ScepHttpTransport(http, server.Url, TimeSpan.FromSeconds(30));
         client = new ScepClient(server, crypto, transport);
+        return ScepClientResult.Ok;
+    }
+
+    public static ScepClientResult Create(X509Certificate2 existing_cert, IScepKey matching_key, ServerConfig server, IScepCrypto crypto, HttpMessageHandler? handler, out ScepClient client, out string error) {
+        ScepClientResult result;
+
+        result = Create(server, crypto, handler, out client, out error);
+        if (result != ScepClientResult.Ok) {
+            return result;
+        }
+
+        if (existing_cert is null || matching_key is null) {
+            error = "existing certificate and matching key are required";
+            return ScepClientResult.InvalidArgument;
+        }
+
+        client.RenewalCertificate = existing_cert;
+        client.RenewalKey = matching_key;
         return ScepClientResult.Ok;
     }
 
@@ -264,6 +284,92 @@ public sealed class ScepClient {
         }
 
         return builder.Build(out pki_message, out subject_key, out error);
+    }
+
+    // -------------------------------------------------------------------------
+    // RenewCertificate (high-level lifecycle with lineage)
+    // -------------------------------------------------------------------------
+
+    public async Task<ScepResult<EnrollOutcome>> RenewCertificateAsync(string cert_id, Storage.CertStore store, Storage.UseRecordLog log) {
+        X509Certificate2 existing_cert;
+        IScepKey existing_key;
+        Storage.CertStore.CertRecord record;
+        string load_error;
+        X509Certificate2 ca_cert;
+        string ca_error;
+        RenewRequest request;
+        ScepResult<EnrollOutcome> result;
+        EnrollOutcome outcome;
+
+        if (!store.Load(Server.Id, cert_id, Crypto, out existing_cert, out existing_key, out record, out load_error)) {
+            return ScepResult<EnrollOutcome>.Fail(ScepClientResult.NotFound, load_error);
+        }
+
+        if (!ResolveCaCert(out ca_cert, out ca_error)) {
+            return ScepResult<EnrollOutcome>.Fail(ScepClientResult.ProtocolError, ca_error);
+        }
+
+        request = new RenewRequest {
+            Subject = record.Subject,
+            ExistingCertificate = existing_cert,
+            ExistingKey = existing_key,
+            Variant = RenewalVariant.Proper,
+            CaCertificate = ca_cert,
+        };
+
+        result = await RenewAsync(request).ConfigureAwait(false);
+        if (!result.IsOk) {
+            return result;
+        }
+
+        outcome = result.Value;
+        if (outcome.Certificate is not null && outcome.SubjectKey is not null) {
+            store.Save(Server.Id, outcome.Certificate, outcome.SubjectKey, Crypto,
+                challenge_password: null, renewed_from: cert_id, transaction_id: outcome.TransactionId);
+        }
+        log.Append(Server.Id, outcome);
+        return result;
+    }
+
+    public ScepResult<EnrollOutcome> RenewCertificate(string cert_id, Storage.CertStore store, Storage.UseRecordLog log) {
+        X509Certificate2 existing_cert;
+        IScepKey existing_key;
+        Storage.CertStore.CertRecord record;
+        string load_error;
+        X509Certificate2 ca_cert;
+        string ca_error;
+        RenewRequest request;
+        ScepResult<EnrollOutcome> result;
+        EnrollOutcome outcome;
+
+        if (!store.Load(Server.Id, cert_id, Crypto, out existing_cert, out existing_key, out record, out load_error)) {
+            return ScepResult<EnrollOutcome>.Fail(ScepClientResult.NotFound, load_error);
+        }
+
+        if (!ResolveCaCert(out ca_cert, out ca_error)) {
+            return ScepResult<EnrollOutcome>.Fail(ScepClientResult.ProtocolError, ca_error);
+        }
+
+        request = new RenewRequest {
+            Subject = record.Subject,
+            ExistingCertificate = existing_cert,
+            ExistingKey = existing_key,
+            Variant = RenewalVariant.Proper,
+            CaCertificate = ca_cert,
+        };
+
+        result = Renew(request);
+        if (!result.IsOk) {
+            return result;
+        }
+
+        outcome = result.Value;
+        if (outcome.Certificate is not null && outcome.SubjectKey is not null) {
+            store.Save(Server.Id, outcome.Certificate, outcome.SubjectKey, Crypto,
+                challenge_password: null, renewed_from: cert_id, transaction_id: outcome.TransactionId);
+        }
+        log.Append(Server.Id, outcome);
+        return result;
     }
 
     // -------------------------------------------------------------------------
