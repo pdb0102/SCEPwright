@@ -63,6 +63,12 @@ public static class CommandRouter {
             case "poll":
                 return RunPoll(args, data_root, output);
 
+            case "test":
+                return RunTest(args, data_root, output);
+
+            case "run":
+                return RunScenario(args, data_root, output);
+
             case "certs":
                 return RunCerts(args, data_root, output);
 
@@ -102,9 +108,40 @@ public static class CommandRouter {
             case "show":
                 return RunServersShow(args, data_root, output);
 
+            case "suggest":
+                return RunServersSuggest(args, data_root, output);
+
             default:
                 return WriteUsage(output);
         }
+    }
+
+    private static int RunServersSuggest(string[] args, string data_root, TextWriter output) {
+        string server_id;
+        ScepClient client;
+        StoredServer stored;
+        ScepCapabilities caps;
+        System.Collections.Generic.IReadOnlyList<string> lines;
+        ClientConfig config;
+        ScepTestClient.Core.Testing.OpinionThresholds thresholds;
+
+        if (args.Length < 3) { output.WriteLine("usage: servers suggest <id>"); return 2; }
+        server_id = args[2];
+        if (!BuildClient(server_id, data_root, output, out client, out stored)) { return 1; }
+        caps = client.GetCaCaps().Value ?? ScepCapabilities.Parse(string.Empty);
+        lines = ScepTestClient.Core.Testing.ServerSuggest.For(server_id, caps);
+        foreach (string line in lines) { output.WriteLine(line); }
+
+        config = ClientConfig.Load(data_root);
+        thresholds = new ScepTestClient.Core.Testing.OpinionThresholds { MinRsaKeyBits = config.MinRsaKeyBits };
+
+        if (caps.Sha256) { output.WriteLine($"posture: SHA-256  {ScepTestClient.Core.Testing.SecurityOpinion.ClassifyDigest("SHA-256")}"); }
+        if (caps.Sha512) { output.WriteLine($"posture: SHA-512  {ScepTestClient.Core.Testing.SecurityOpinion.ClassifyDigest("SHA-512")}"); }
+        if (caps.Sha1) { output.WriteLine($"posture: SHA-1  {ScepTestClient.Core.Testing.SecurityOpinion.ClassifyDigest("SHA-1")}"); }
+        if (caps.Aes) { output.WriteLine($"posture: AES-128-CBC  {ScepTestClient.Core.Testing.SecurityOpinion.ClassifyCipher("AES-128-CBC")}"); }
+        if (caps.Des3) { output.WriteLine($"posture: DES-EDE3-CBC  {ScepTestClient.Core.Testing.SecurityOpinion.ClassifyCipher("DES-EDE3-CBC")}"); }
+        output.WriteLine($"posture: RSA-{thresholds.MinRsaKeyBits}  {ScepTestClient.Core.Testing.SecurityOpinion.ClassifyRsa(thresholds.MinRsaKeyBits, thresholds)}");
+        return 0;
     }
 
     private static int RunServersAdd(string[] args, string data_root, TextWriter output) {
@@ -272,15 +309,17 @@ public static class CommandRouter {
         ScepResult<EnrollOutcome> outcome;
         ServerConfig config;
         ConsoleTrace tracer;
+        System.Net.Http.HttpClient http;
+        string challenge_error;
 
         if (args.Length < 2) {
-            output.WriteLine("usage: get <serverId> --subject \"CN=x\" [--challenge <pw>] [--key-spec rsa:2048] [--sid <s>] [-v]");
+            output.WriteLine("usage: get <serverId> --subject \"CN=x\" [--challenge <pw>] [--simulator <url>] [--ndes --ndes-user <u> --ndes-password <p> [--ndes-admin-url <url>]] [--key-spec rsa:2048] [--sid <s>] [-v]");
             return 2;
         }
 
         server_id = args[1];
         subject = Opt(args, "--subject");
-        challenge = Opt(args, "--challenge");
+        challenge = null;
         key_spec_str = Opt(args, "--key-spec") ?? "rsa:2048";
         sid = Opt(args, "--sid");
         verbosity = CountFlag(args, "-v");
@@ -303,6 +342,15 @@ public static class CommandRouter {
         if (stored is null) {
             output.WriteLine($"unknown server '{server_id}'");
             return 2;
+        }
+
+        http = new System.Net.Http.HttpClient();
+        if (!ResolveChallenge(args, stored.Url, http, out challenge, out challenge_error)) {
+            output.WriteLine($"challenge resolution failed: {challenge_error}");
+            return 1;
+        }
+        if (challenge != null) {
+            output.WriteLine($"challenge: {Redaction.Hash(challenge)}");
         }
 
         load_result = ScepCrypto.Load(null, out crypto, out crypto_error);
@@ -564,6 +612,227 @@ public static class CommandRouter {
         return result.Status == ScepClientResult.Pending ? 0 : 1;
     }
 
+    // -------------------------------------------------------------------------
+    // test lifecycle/full/probe
+    // -------------------------------------------------------------------------
+
+    private static int RunTest(string[] args, string data_root, TextWriter output) {
+        string verb;
+        string server_id;
+        ScepClient client;
+        StoredServer stored;
+        ScepTestClient.Core.Testing.TestEngine engine;
+        ScepTestClient.Core.Testing.TestReport report;
+        System.Collections.Generic.List<string> formats;
+
+        if (args.Length < 3) { output.WriteLine("usage: test <lifecycle|full|probe> <server> [--report-format junit|trx|json|md] [--jamf-max-wait <ms>]"); return 2; }
+        verb = args[1];
+        server_id = args[2];
+
+        if (!BuildClient(server_id, data_root, output, out client, out stored)) { return 1; }
+        engine = new ScepTestClient.Core.Testing.TestEngine();
+
+        switch (verb) {
+            case "lifecycle":
+                ScepTestClient.Core.Storage.CertStore store;
+                ScepTestClient.Core.Storage.UseRecordLog log;
+
+                store = new ScepTestClient.Core.Storage.CertStore(data_root);
+                log = new ScepTestClient.Core.Storage.UseRecordLog(data_root);
+                report = engine.RunLifecycle(client, store, log);
+                break;
+
+            case "full":
+                report = RunFullWithOptionalJamf(args, client, output);
+                break;
+
+            case "probe":
+                report = engine.RunProbe(client);
+                break;
+
+            default:
+                output.WriteLine("usage: test <lifecycle|full|probe> <server>");
+                return 2;
+        }
+
+        output.Write(ScepTestClient.Core.Reporting.ConsoleSummary.Format(report));
+        formats = ReadRepeated(args, "--report-format");
+        WriteReports(report, formats, data_root, server_id, output);
+        return report.Failed == 0 ? 0 : 1;
+    }
+
+    private static ScepTestClient.Core.Testing.TestReport RunFullWithOptionalJamf(string[] args, ScepClient client, TextWriter output) {
+        ScepTestClient.Core.Testing.TestEngine engine;
+        ScepTestClient.Core.Testing.TestReport report;
+        ScepResult<System.Collections.Generic.IReadOnlyList<System.Security.Cryptography.X509Certificates.X509Certificate2>> ca;
+        ScepTestClient.Core.Protocol.ScepCapabilities caps;
+        string? jamf;
+
+        engine = new ScepTestClient.Core.Testing.TestEngine();
+        ca = client.GetCaCert();
+        if (!ca.IsOk) {
+            output.WriteLine($"getcacert failed: {ca.Status} {ca.Error}");
+            report = new ScepTestClient.Core.Testing.TestReport { ServerId = client.Server.Id, Mode = "full" };
+            report.Results.Add(new ScepTestClient.Core.Testing.CheckResult("GetCACert", ScepTestClient.Core.Testing.CheckOutcome.Failed,
+                FailInfo.None, FailInfo.None, PkiStatus.Failure, $"GetCACert failed: {ca.Error}", "RFC 8894", System.TimeSpan.Zero));
+            return report;
+        }
+        caps = client.GetCaCaps().Value ?? ScepTestClient.Core.Protocol.ScepCapabilities.Parse(string.Empty);
+        report = engine.RunFull(client, ca.Value[0], caps);
+
+        jamf = Opt(args, "--jamf-max-wait");
+        if (jamf != null && int.TryParse(jamf, out int ms)) {
+            AppendJamfStep(report, client, ca.Value[0], ms, output);
+        }
+        return report;
+    }
+
+    private static void AppendJamfStep(ScepTestClient.Core.Testing.TestReport report, ScepClient client, System.Security.Cryptography.X509Certificates.X509Certificate2 ca_cert, int ms, TextWriter output) {
+        KeySpec spec;
+        string key_spec_error;
+        IScepKey key;
+        string key_error;
+        EnrollRequest request;
+        ScepTestClient.Core.Testing.JamfResult result;
+
+        if (!KeySpec.Parse("rsa:2048", out spec, out key_spec_error)) {
+            report.Results.Add(new ScepTestClient.Core.Testing.CheckResult("jamf timing", ScepTestClient.Core.Testing.CheckOutcome.Failed,
+                FailInfo.None, FailInfo.None, PkiStatus.Failure, $"key spec error: {key_spec_error}", "Jamf", System.TimeSpan.Zero));
+            return;
+        }
+        if (!client.Crypto.GenerateKey(spec, out key, out key_error)) {
+            report.Results.Add(new ScepTestClient.Core.Testing.CheckResult("jamf timing", ScepTestClient.Core.Testing.CheckOutcome.Failed,
+                FailInfo.None, FailInfo.None, PkiStatus.Failure, $"key generation failed: {key_error}", "Jamf", System.TimeSpan.Zero));
+            return;
+        }
+
+        request = new EnrollRequest {
+            Subject = "CN=jamf-probe",
+            Key = key,
+            CaCertificate = ca_cert,
+        };
+
+        result = ScepTestClient.Core.Testing.JamfSimulator.Run(client, request, ca_cert.Subject, System.TimeSpan.FromMilliseconds(ms), System.TimeSpan.FromMilliseconds(500));
+
+        if (!result.TimedOut) {
+            report.Results.Add(new ScepTestClient.Core.Testing.CheckResult("jamf timing", ScepTestClient.Core.Testing.CheckOutcome.Passed,
+                FailInfo.None, FailInfo.None, result.FinalStatus, $"jamf poll completed in {result.Elapsed.TotalMilliseconds:0}ms ({result.PollCount} polls)", "Jamf", result.Elapsed));
+        } else {
+            report.Results.Add(new ScepTestClient.Core.Testing.CheckResult("jamf timing", ScepTestClient.Core.Testing.CheckOutcome.Failed,
+                FailInfo.None, FailInfo.None, result.FinalStatus, $"jamf poll exceeded {ms}ms", "Jamf", result.Elapsed));
+        }
+    }
+
+    private static System.Collections.Generic.List<string> ReadRepeated(string[] args, string name) {
+        System.Collections.Generic.List<string> values;
+        int i;
+
+        values = new System.Collections.Generic.List<string>();
+        for (i = 0; i < args.Length - 1; i++) {
+            if (args[i] == name) { values.Add(args[i + 1]); }
+        }
+        return values;
+    }
+
+    private static void WriteReports(ScepTestClient.Core.Testing.TestReport report, System.Collections.Generic.List<string> formats, string data_root, string server_id, TextWriter output) {
+        string runs_dir;
+        string stamp;
+
+        if (formats.Count == 0) { return; }
+        runs_dir = Path.Combine(data_root, "runs");
+        Directory.CreateDirectory(runs_dir);
+        stamp = System.DateTime.UtcNow.ToString("yyyyMMdd-HHmmss");
+
+        foreach (string format in formats) {
+            string content;
+            string ext;
+
+            switch (format.ToLowerInvariant()) {
+                case "junit": content = ScepTestClient.Core.Reporting.JUnitReport.Emit(report); ext = "junit.xml"; break;
+                case "trx": content = ScepTestClient.Core.Reporting.TrxReport.Emit(report); ext = "trx"; break;
+                case "json": content = ScepTestClient.Core.Reporting.JsonReport.Emit(report); ext = "json"; break;
+                case "md": content = ScepTestClient.Core.Reporting.MarkdownReport.Emit(report); ext = "md"; break;
+                default: output.WriteLine($"unknown report format: {format}"); continue;
+            }
+            File.WriteAllText(Path.Combine(runs_dir, $"{stamp}-{server_id}-{report.Mode}.{ext}"), content);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // run (scenario / playlist)
+    // -------------------------------------------------------------------------
+
+    private static int RunScenario(string[] args, string data_root, TextWriter output) {
+        string path;
+        string server_id;
+        string json;
+        ScepTestClient.Core.Testing.ScenarioFile scenario;
+        string parse_error;
+        ScepClient client;
+        StoredServer stored;
+        ScepResult<System.Collections.Generic.IReadOnlyList<System.Security.Cryptography.X509Certificates.X509Certificate2>> ca;
+        ScepTestClient.Core.Testing.TestReport report;
+        System.Collections.Generic.List<string> formats;
+
+        if (args.Length < 3) { output.WriteLine("usage: run <scenario.json> <server> [--report-format ...]"); return 2; }
+        path = args[1];
+        server_id = args[2];
+        if (!File.Exists(path)) { output.WriteLine($"scenario not found: {path}"); return 2; }
+        json = File.ReadAllText(path);
+        if (!ScepTestClient.Core.Testing.ScenarioRunner.Parse(json, out scenario, out parse_error)) { output.WriteLine($"bad scenario: {parse_error}"); return 2; }
+        if (!BuildClient(server_id, data_root, output, out client, out stored)) { return 1; }
+
+        ca = client.GetCaCert();
+        if (!ca.IsOk) { output.WriteLine($"GetCACert failed: {ca.Status} {ca.Error}"); return 1; }
+        report = ScepTestClient.Core.Testing.ScenarioRunner.Run(client, scenario, ca.Value[0]);
+
+        output.Write(ScepTestClient.Core.Reporting.ConsoleSummary.Format(report));
+        formats = ReadRepeated(args, "--report-format");
+        WriteReports(report, formats, data_root, server_id, output);
+        return report.Failed == 0 ? 0 : 1;
+    }
+
+    // -------------------------------------------------------------------------
+    // Challenge-source resolution (explicit > simulator > ndes)
+    // -------------------------------------------------------------------------
+
+    private static bool ResolveChallenge(string[] args, string server_url, System.Net.Http.HttpClient http, out string? challenge, out string error) {
+        string? explicit_pw;
+        string? simulator;
+        ScepTestClient.Core.Challenge.IChallengeSource source;
+        string resolved;
+
+        challenge = null;
+        error = string.Empty;
+
+        explicit_pw = Opt(args, "--challenge");
+        if (explicit_pw != null) { challenge = explicit_pw; return true; }
+
+        simulator = Opt(args, "--simulator");
+        if (simulator != null) {
+            source = new ScepTestClient.Core.Challenge.SimulatorChallengeSource(http, simulator);
+            if (!source.TryGet(out resolved, out error)) { return false; }
+            challenge = resolved;
+            return true;
+        }
+
+        if (HasFlag(args, "--ndes")) {
+            string admin_url;
+            string user;
+            string password;
+
+            admin_url = ScepTestClient.Core.Challenge.NdesAdminUrl.Derive(server_url, Opt(args, "--ndes-admin-url"));
+            user = Opt(args, "--ndes-user") ?? string.Empty;
+            password = Opt(args, "--ndes-password") ?? string.Empty;
+            source = new ScepTestClient.Core.Challenge.NdesChallengeSource(http, admin_url, user, password);
+            if (!source.TryGet(out resolved, out error)) { return false; }
+            challenge = resolved;
+            return true;
+        }
+
+        return true; // no challenge source; null is fine
+    }
+
     private static RenewalVariant ParseVariant(string? text) {
         switch (text) {
             case "reenroll-same-subject": return RenewalVariant.ReenrollSameSubject;
@@ -667,16 +936,19 @@ public static class CommandRouter {
         output.WriteLine("  servers add <url> [--name <n>] [--ca-identifier <c>] [--transport get|post]");
         output.WriteLine("  servers list");
         output.WriteLine("  servers show <id>");
+        output.WriteLine("  servers suggest <id>");
         output.WriteLine("  getcacaps <serverId>");
         output.WriteLine("  get <serverId> --subject \"CN=x\" [--challenge <pw>] [--key-spec rsa:2048] [--sid <s>] [-v]");
         output.WriteLine("  certs list [serverId]");
         output.WriteLine("  getcacert <serverId>");
         output.WriteLine("  getnextcacert <serverId>");
-        output.WriteLine("  enroll <serverId> --subject \"CN=x\" [--challenge <pw>] [--key-spec rsa:2048] [--encrypt-keys --key-pass <pw>]");
+        output.WriteLine("  enroll <serverId> --subject \"CN=x\" [--challenge <pw> | --simulator <url> | --ndes --ndes-user <u> --ndes-password <p>] [--key-spec rsa:2048] [--encrypt-keys --key-pass <pw>]");
         output.WriteLine("  renew <certId> [--variant proper|reenroll-same-subject|pkcsreq-old-cert|same-key|expired] [--encrypt-keys --key-pass <pw>]");
         output.WriteLine("  getcert <serverId> --issuer <dn> --serial <hex>");
         output.WriteLine("  getcrl <serverId> --issuer <dn> --serial <hex>");
         output.WriteLine("  poll <serverId> --issuer <dn> --subject <dn> --txn <id>");
+        output.WriteLine("  test <lifecycle|full|probe> <serverId> [--report-format junit|trx|json|md] [--jamf-max-wait <ms>]");
+        output.WriteLine("  run <scenario.json> <serverId> [--report-format junit|trx|json|md]");
         output.WriteLine("  config show");
         return 2;
     }

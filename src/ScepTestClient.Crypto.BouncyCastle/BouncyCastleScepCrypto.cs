@@ -63,7 +63,7 @@ public sealed class BouncyCastleScepCrypto : IScepCrypto {
         }
     }
     public bool EncodePkiMessage(PkiMessage message, FaultDirectives? faults, out byte[] der, out string error) {
-        // faults: Phase-1 no-op stub; fault injection is wired up in Phase 3.
+        // faults (when non-null) are applied inside the provider's single fault branch in BcPkiMessage.EncodePkiOperation.
         byte[] csr_der;
 
         der = System.Array.Empty<byte>();
@@ -90,7 +90,7 @@ public sealed class BouncyCastleScepCrypto : IScepCrypto {
                     if (!EncodeCsr(message.InnerCsr, out csr_der, out error)) {
                         return false;
                     }
-                    der = BcPkiMessage.EncodePkiOperation(message, csr_der, signer_key, ScepAttributes.NumberFor(message.MessageType));
+                    der = BcPkiMessage.EncodePkiOperation(message, csr_der, signer_key, ScepAttributes.NumberFor(message.MessageType), faults);
                     return true;
                 case MessageType.GetCert:
                 case MessageType.GetCrl:
@@ -102,7 +102,8 @@ public sealed class BouncyCastleScepCrypto : IScepCrypto {
                         message,
                         BcPkiMessage.BuildIssuerAndSerial(message.IssuerName!, message.SerialNumber!),
                         signer_key,
-                        ScepAttributes.NumberFor(message.MessageType));
+                        ScepAttributes.NumberFor(message.MessageType),
+                        faults);
                     return true;
                 case MessageType.CertPoll:
                     if (string.IsNullOrEmpty(message.IssuerName) || string.IsNullOrEmpty(message.SubjectName)) {
@@ -113,7 +114,8 @@ public sealed class BouncyCastleScepCrypto : IScepCrypto {
                         message,
                         BcPkiMessage.BuildIssuerAndSubject(message.IssuerName!, message.SubjectName!),
                         signer_key,
-                        ScepAttributes.NumberFor(message.MessageType));
+                        ScepAttributes.NumberFor(message.MessageType),
+                        faults);
                     return true;
                 default:
                     error = $"unsupported message type: {message.MessageType}";

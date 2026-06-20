@@ -11,27 +11,30 @@ namespace ScepTestClient.Tests.Fakes;
 
 public sealed class FakeScepServer : IAsyncDisposable {
     private readonly WebApplication _app;
-    public Uri ScepUrl { get; }
+    public Uri ScepUrl { get; private set; }
     public TestCa Ca { get; }
+    public string CaCapsBody { get; set; } = "POSTPKIOperation\nSHA-256\nAES\n";
 
-    private FakeScepServer(WebApplication app, Uri url, TestCa ca) { _app = app; ScepUrl = url; Ca = ca; }
+    private FakeScepServer(WebApplication app, TestCa ca) { _app = app; Ca = ca; ScepUrl = new Uri("http://127.0.0.1/scep"); }
 
     public static async Task<FakeScepServer> StartAsync() {
         WebApplicationBuilder builder;
         WebApplication app;
         TestCa ca;
+        FakeScepServer self;
 
         ca = TestCa.Create();
         builder = WebApplication.CreateBuilder();
         builder.Logging.ClearProviders();
         builder.WebHost.UseUrls("http://127.0.0.1:0");
         app = builder.Build();
+        self = new FakeScepServer(app, ca);
 
         app.MapGet("/scep", async (HttpContext ctx) => {
             string op;
 
             op = ctx.Request.Query["operation"].ToString();
-            if (op == "GetCACaps") { await ctx.Response.WriteAsync("POSTPKIOperation\nSHA-256\nAES\n"); return; }
+            if (op == "GetCACaps") { await ctx.Response.WriteAsync(self.CaCapsBody); return; }
             if (op == "GetCACert") {
                 ctx.Response.ContentType = "application/x-x509-ca-cert";
                 await ctx.Response.Body.WriteAsync(ca.Certificate.GetEncoded());
@@ -63,10 +66,9 @@ public sealed class FakeScepServer : IAsyncDisposable {
         await app.StartAsync();
 
         string base_url;
-        Uri scep;
         base_url = app.Urls.First();
-        scep = new Uri(new Uri(base_url), "/scep");
-        return new FakeScepServer(app, scep, ca);
+        self.ScepUrl = new Uri(new Uri(base_url), "/scep");
+        return self;
     }
 
     public async ValueTask DisposeAsync() => await _app.DisposeAsync();

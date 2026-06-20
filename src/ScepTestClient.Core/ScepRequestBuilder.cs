@@ -29,6 +29,7 @@ public sealed class ScepRequestBuilder {
     private string? _poll_subject;
     private string _digest_oid;
     private string _cipher_oid;
+    private FaultDirectives? _faults;
 
     private ScepRequestBuilder(IScepCrypto crypto) {
         _crypto = crypto;
@@ -56,6 +57,9 @@ public sealed class ScepRequestBuilder {
     public ScepRequestBuilder SignerKey(IScepKey key) { _signer_key = key; return this; }
     public ScepRequestBuilder IssuerAndSerial(string issuer_name, string serial_hex) { _issuer_name = issuer_name; _serial = serial_hex; return this; }
     public ScepRequestBuilder IssuerAndSubject(string issuer_name, string subject_name) { _issuer_name = issuer_name; _poll_subject = subject_name; return this; }
+    public ScepRequestBuilder AllowFaults(FaultDirectives faults) { _faults = faults; return this; }
+
+    public FaultDirectives? Faults => _faults;
 
     public ScepRequestBuilder Digest(string name_or_oid) {
         _digest_oid = Algorithms.OidFor(name_or_oid) ?? name_or_oid;

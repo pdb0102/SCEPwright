@@ -215,6 +215,16 @@ public sealed class ScepClient {
     }
 
     // -------------------------------------------------------------------------
+    // SubmitPkiOperation (deliberate-fault path for the test/compliance engine)
+    // -------------------------------------------------------------------------
+
+    public ScepResult<EnrollOutcome> SubmitPkiOperation(PkiMessage message, IScepKey subject_key, FaultDirectives? faults = null) =>
+        SendPkiOperationSync(message, subject_key, faults);
+
+    public Task<ScepResult<EnrollOutcome>> SubmitPkiOperationAsync(PkiMessage message, IScepKey subject_key, FaultDirectives? faults = null) =>
+        SendPkiOperationAsync(message, subject_key, faults);
+
+    // -------------------------------------------------------------------------
     // Renew
     // -------------------------------------------------------------------------
 
@@ -695,7 +705,7 @@ public sealed class ScepClient {
         return ScepResult<EnrollOutcome>.Ok(null!);
     }
 
-    private ScepResult<EnrollOutcome> SendPkiOperationSync(PkiMessage pki_message, IScepKey subject_key) {
+    private ScepResult<EnrollOutcome> SendPkiOperationSync(PkiMessage pki_message, IScepKey subject_key, FaultDirectives? faults = null) {
         byte[] der;
         string encode_error;
         ScepResult<byte[]> raw;
@@ -704,7 +714,7 @@ public sealed class ScepClient {
 
         trans_id = pki_message.TransactionId!;
 
-        if (!pki_message.Encode(Crypto, out der, out encode_error)) {
+        if (!pki_message.Encode(Crypto, faults, out der, out encode_error)) {
             return ScepResult<EnrollOutcome>.Fail(ScepClientResult.CryptoError, encode_error);
         }
 
@@ -723,7 +733,7 @@ public sealed class ScepClient {
         return DecodeResponse(raw.Value, pki_message.SignerKey!, subject_key, trans_id, sw.Elapsed);
     }
 
-    private async Task<ScepResult<EnrollOutcome>> SendPkiOperationAsync(PkiMessage pki_message, IScepKey subject_key) {
+    private async Task<ScepResult<EnrollOutcome>> SendPkiOperationAsync(PkiMessage pki_message, IScepKey subject_key, FaultDirectives? faults = null) {
         byte[] der;
         string encode_error;
         ScepResult<byte[]> raw;
@@ -732,7 +742,7 @@ public sealed class ScepClient {
 
         trans_id = pki_message.TransactionId!;
 
-        if (!pki_message.Encode(Crypto, out der, out encode_error)) {
+        if (!pki_message.Encode(Crypto, faults, out der, out encode_error)) {
             return ScepResult<EnrollOutcome>.Fail(ScepClientResult.CryptoError, encode_error);
         }
 

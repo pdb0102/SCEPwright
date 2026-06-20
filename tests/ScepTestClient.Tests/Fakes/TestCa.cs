@@ -26,6 +26,9 @@ public sealed class TestCa {
 
     private readonly Dictionary<string, Org.BouncyCastle.X509.X509Certificate> _issued_by_serial = new Dictionary<string, Org.BouncyCastle.X509.X509Certificate>();
 
+    public bool PendingMode { get; set; }
+    public string? ExpectedChallenge { get; set; }
+
     private TestCa(AsymmetricCipherKeyPair keyPair, Org.BouncyCastle.X509.X509Certificate cert) {
         KeyPair = keyPair;
         Certificate = cert;
@@ -97,6 +100,16 @@ public sealed class TestCa {
         degenerate_gen.AddCertificates(issued_cert_store);
         degenerate_bytes = degenerate_gen.Generate(new CmsProcessableByteArray(System.Array.Empty<byte>()), false).GetEncoded();
         return EnvelopeAndSign(degenerate_bytes, recipient_cert, trans_id, recipient_nonce, "3", "0");
+    }
+
+    // Builds a PENDING CertRep: pkiStatus=3, messageType=3 (CertRep), no issued cert (empty degenerate PKCS#7).
+    public byte[] BuildPendingCertRep(X509Certificate2 recipient_cert, string trans_id, byte[] recipient_nonce) {
+        CmsSignedDataGenerator degenerate_gen;
+        byte[] degenerate_bytes;
+
+        degenerate_gen = new CmsSignedDataGenerator();
+        degenerate_bytes = degenerate_gen.Generate(new CmsProcessableByteArray(System.Array.Empty<byte>()), false).GetEncoded();
+        return EnvelopeAndSign(degenerate_bytes, recipient_cert, trans_id, recipient_nonce, "3", "3");
     }
 
     public Org.BouncyCastle.X509.X509Crl GenerateCrl() {
@@ -194,91 +207,188 @@ public sealed class TestCa {
 
     // Server side: decrypt the PKCSReq, issue a cert for the enclosed CSR, return a SUCCESS CertRep
     // enveloped back to the request's signer certificate (which wraps the client's key).
+    // A priority ladder runs first, answering the RFC-expected failInfo for each detectable fault.
     public byte[] HandlePkiOperation(byte[] pkcs_req_der) {
-        const string OidTransId = "2.16.840.1.113733.1.9.7";
-        const string OidSenderNonce = "2.16.840.1.113733.1.9.5";
-
         CmsSignedData signed;
         SignerInformation signer;
-        Org.BouncyCastle.X509.X509Certificate signer_bc_cert;
-        X509Certificate2 signer_cert;
-        MemoryStream enveloped_stream;
-        byte[] enveloped_bytes;
-        CmsEnvelopedData env;
-        RecipientInformationStore recipients;
-        RecipientInformation recipient;
-        byte[] csr_der;
+        X509Certificate2 requester_cert;
+        string trans_id;
+        byte[] sender_nonce;
+        byte[] inner_payload;
+        System.DateTime? signing_time;
+
+        signed = new CmsSignedData(pkcs_req_der);
+        signer = First(signed);
+
+        // 1. Signature integrity -> badMessageCheck ("1").
+        if (!VerifyOuterSignature(pkcs_req_der)) {
+            return BuildFailureCertRep(RecipientFrom(signed, signer), TransIdFrom(signer), NonceFrom(signer), "1");
+        }
+
+        // 2. signingTime window (+-5 min) -> badTime ("3").
+        signing_time = ReadSigningTime(pkcs_req_der);
+        if (signing_time.HasValue && System.Math.Abs((DateTime.UtcNow - signing_time.Value).TotalMinutes) > 5) {
+            return BuildFailureCertRep(RecipientFrom(signed, signer), TransIdFrom(signer), NonceFrom(signer), "3");
+        }
+
+        // 3. Forbidden digest (MD5) -> badAlg ("0").
+        if (signer.DigestAlgOid == "1.2.840.113549.2.5") {
+            return BuildFailureCertRep(RecipientFrom(signed, signer), TransIdFrom(signer), NonceFrom(signer), "0");
+        }
+
+        // 4. Inner CSR must parse -> badRequest ("2").
+        if (!InnerCsrParses(pkcs_req_der)) {
+            return BuildFailureCertRep(RecipientFrom(signed, signer), TransIdFrom(signer), NonceFrom(signer), "2");
+        }
+
+        DecodeRequest(pkcs_req_der, out requester_cert, out trans_id, out sender_nonce, out inner_payload);
+
+        // 5. Expected challenge -> FAILURE with badRequest ("2").
+        if (ExpectedChallenge != null && ChallengeFrom(inner_payload) != ExpectedChallenge) {
+            return BuildFailureCertRep(requester_cert, trans_id, sender_nonce, "2");
+        }
+
+        // 6. Expired signer cert (mirror a real CA refusing to renew off an expired cert).
+        if (SignerCertExpired(requester_cert)) {
+            return BuildFailureCertRep(requester_cert, trans_id, sender_nonce, "2");
+        }
+
+        // 7. PENDING mode.
+        if (PendingMode) {
+            return BuildPendingCertRep(requester_cert, trans_id, sender_nonce);
+        }
+
+        // Success (existing issue path).
+        return IssueAndBuildSuccess(inner_payload, requester_cert, trans_id, sender_nonce);
+    }
+
+    private X509Certificate2 RecipientFrom(CmsSignedData signed, SignerInformation signer) {
+        return new X509Certificate2(FirstCert(signed, signer).GetEncoded());
+    }
+
+    private static string TransIdFrom(SignerInformation signer) {
+        const string OidTransId = "2.16.840.1.113733.1.9.7";
+        Org.BouncyCastle.Asn1.Cms.AttributeTable attrs;
+        Org.BouncyCastle.Asn1.Cms.Attribute? tx_a;
+
+        attrs = signer.SignedAttributes;
+        if (attrs is null) { return "tx"; }
+        tx_a = attrs[new DerObjectIdentifier(OidTransId)];
+        if (tx_a is null) { return "tx"; }
+        return ((DerPrintableString)tx_a.AttrValues[0]).GetString();
+    }
+
+    private static byte[] NonceFrom(SignerInformation signer) {
+        const string OidSenderNonce = "2.16.840.1.113733.1.9.5";
+        Org.BouncyCastle.Asn1.Cms.AttributeTable attrs;
+        Org.BouncyCastle.Asn1.Cms.Attribute? n_a;
+
+        attrs = signer.SignedAttributes;
+        if (attrs is null) { return new byte[16]; }
+        n_a = attrs[new DerObjectIdentifier(OidSenderNonce)];
+        if (n_a is null) { return new byte[16]; }
+        return ((Asn1OctetString)n_a.AttrValues[0]).GetOctets();
+    }
+
+    private static string ChallengeFrom(byte[] csr_der) {
+        const string OidChallengePassword = "1.2.840.113549.1.9.7";
+        Pkcs10CertificationRequest csr;
+        CertificationRequestInfo info;
+        Asn1Set attributes;
+
+        csr = new Pkcs10CertificationRequest(csr_der);
+        info = csr.GetCertificationRequestInfo();
+        attributes = info.Attributes;
+        if (attributes is null) { return string.Empty; }
+
+        foreach (Asn1Encodable encodable in attributes) {
+            AttributePkcs attr;
+
+            attr = AttributePkcs.GetInstance(encodable);
+            if (attr.AttrType.Id == OidChallengePassword && attr.AttrValues.Count > 0) {
+                return ((IAsn1String)attr.AttrValues[0]).GetString();
+            }
+        }
+        return string.Empty;
+    }
+
+    private static bool SignerCertExpired(X509Certificate2 signer_cert) {
+        return signer_cert.NotAfter < DateTime.UtcNow;
+    }
+
+    private byte[] IssueAndBuildSuccess(byte[] csr_der, X509Certificate2 requester_cert, string trans_id, byte[] sender_nonce) {
         Pkcs10CertificationRequest csr;
         AsymmetricKeyParameter csr_public_key;
         string subject_dn;
         Org.BouncyCastle.X509.X509Certificate issued;
-        string trans_id;
-        byte[] sender_nonce;
-        Org.BouncyCastle.Asn1.Cms.AttributeTable signed_attrs;
-
-        signed = new CmsSignedData(pkcs_req_der);
-
-        signer = signed.GetSignerInfos().GetSigners().Cast<SignerInformation>().First();
-        signer_bc_cert = signed.GetCertificates()
-            .EnumerateMatches(signer.SignerID)
-            .Cast<Org.BouncyCastle.X509.X509Certificate>()
-            .First();
-        signer_cert = new X509Certificate2(signer_bc_cert.GetEncoded());
-
-        enveloped_stream = new MemoryStream();
-        signed.SignedContent.Write(enveloped_stream);
-        enveloped_bytes = enveloped_stream.ToArray();
-
-        env = new CmsEnvelopedData(enveloped_bytes);
-        recipients = env.GetRecipientInfos();
-        recipient = recipients.GetRecipients().Cast<RecipientInformation>().First();
-        csr_der = recipient.GetContent(KeyPair.Private);
 
         csr = new Pkcs10CertificationRequest(csr_der);
         csr_public_key = csr.GetPublicKey();
         subject_dn = csr.GetCertificationRequestInfo().Subject.ToString();
 
-        if (signer_cert.NotAfter < DateTime.UtcNow) {
-            // mirror a real CA refusing to renew off an expired cert
-            byte[] failure;
-            string tx_for_fail;
-            byte[] nonce_for_fail;
-
-            tx_for_fail = "tx";
-            nonce_for_fail = new byte[16];
-            signed_attrs = signer.SignedAttributes;
-            if (signed_attrs is not null) {
-                Org.BouncyCastle.Asn1.Cms.Attribute? tx_a = signed_attrs[new DerObjectIdentifier(OidTransId)];
-                Org.BouncyCastle.Asn1.Cms.Attribute? n_a = signed_attrs[new DerObjectIdentifier(OidSenderNonce)];
-                if (tx_a is not null) { tx_for_fail = ((DerPrintableString)tx_a.AttrValues[0]).GetString(); }
-                if (n_a is not null) { nonce_for_fail = ((Asn1OctetString)n_a.AttrValues[0]).GetOctets(); }
-            }
-            failure = BuildFailureCertRep(signer_cert, tx_for_fail, nonce_for_fail, "2");
-            return failure;
-        }
-
         issued = Issue(csr_public_key, subject_dn);
+        return BuildSuccessCertRep(issued, requester_cert, trans_id, sender_nonce);
+    }
 
-        signed_attrs = signer.SignedAttributes;
-        trans_id = "tx";
-        sender_nonce = new byte[16];
+    public bool VerifyOuterSignature(byte[] der) {
+        CmsSignedData signed;
+        SignerInformation signer;
+        Org.BouncyCastle.X509.X509Certificate signer_cert;
 
-        if (signed_attrs is not null) {
-            Org.BouncyCastle.Asn1.Cms.Attribute? tx_attr;
-            Org.BouncyCastle.Asn1.Cms.Attribute? nonce_attr;
-
-            tx_attr = signed_attrs[new DerObjectIdentifier(OidTransId)];
-            if (tx_attr is not null) {
-                trans_id = ((DerPrintableString)tx_attr.AttrValues[0]).GetString();
-            }
-
-            nonce_attr = signed_attrs[new DerObjectIdentifier(OidSenderNonce)];
-            if (nonce_attr is not null) {
-                sender_nonce = ((Asn1OctetString)nonce_attr.AttrValues[0]).GetOctets();
-            }
+        signed = new CmsSignedData(der);
+        signer = First(signed);
+        signer_cert = FirstCert(signed, signer);
+        try {
+            return signer.Verify(signer_cert.GetPublicKey());
+        } catch (System.Exception) {
+            return false;
         }
+    }
 
-        return BuildSuccessCertRep(issued, signer_cert, trans_id, sender_nonce);
+    public System.DateTime? ReadSigningTime(byte[] der) {
+        CmsSignedData signed;
+        SignerInformation signer;
+        Org.BouncyCastle.Asn1.Cms.Attribute? attr;
+
+        signed = new CmsSignedData(der);
+        signer = First(signed);
+        if (signer.SignedAttributes == null) { return null; }
+        attr = signer.SignedAttributes[new DerObjectIdentifier("1.2.840.113549.1.9.5")];
+        if (attr == null) { return null; }
+        return Org.BouncyCastle.Asn1.Cms.Time.GetInstance(attr.AttrValues[0]).ToDateTime();
+    }
+
+    public bool InnerCsrParses(byte[] der) {
+        byte[] inner;
+        Org.BouncyCastle.Pkcs.Pkcs10CertificationRequest parsed;
+
+        try {
+            inner = DecryptInner(der);
+            parsed = new Org.BouncyCastle.Pkcs.Pkcs10CertificationRequest(inner);
+            return parsed.Verify();
+        } catch (System.Exception) {
+            return false;
+        }
+    }
+
+    private static SignerInformation First(CmsSignedData signed) {
+        return signed.GetSignerInfos().GetSigners().Cast<SignerInformation>().First();
+    }
+
+    private static Org.BouncyCastle.X509.X509Certificate FirstCert(CmsSignedData signed, SignerInformation signer) {
+        return signed.GetCertificates().EnumerateMatches(signer.SignerID).Cast<Org.BouncyCastle.X509.X509Certificate>().First();
+    }
+
+    private byte[] DecryptInner(byte[] der) {
+        CmsSignedData signed;
+        MemoryStream env_stream;
+        CmsEnvelopedData env;
+
+        signed = new CmsSignedData(der);
+        env_stream = new MemoryStream();
+        signed.SignedContent.Write(env_stream);
+        env = new CmsEnvelopedData(env_stream.ToArray());
+        return env.GetRecipientInfos().GetRecipients().Cast<RecipientInformation>().First().GetContent(KeyPair.Private);
     }
 
     public string PeekMessageType(byte[] der) {
@@ -362,6 +472,11 @@ public sealed class TestCa {
         Org.BouncyCastle.X509.X509Certificate issued;
 
         DecodeRequest(der, out requester_cert, out trans_id, out nonce, out inner);
+
+        if (PendingMode) {
+            return BuildPendingCertRep(requester_cert, trans_id, nonce);
+        }
+
         ias = Asn1Sequence.GetInstance(Asn1Object.FromByteArray(inner));
         subject_name = Org.BouncyCastle.Asn1.X509.X509Name.GetInstance(ias[1]);
 
