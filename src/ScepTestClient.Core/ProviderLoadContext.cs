@@ -13,7 +13,14 @@ internal sealed class ProviderLoadContext : AssemblyLoadContext {
     protected override Assembly? Load(AssemblyName name) {
         string? path;
 
-        // Share the contract assembly with the host so IScepCrypto keeps one Type identity.
+        // Returning null here forces the contract assembly to resolve to the host's
+        // already-loaded copy (via AssemblyLoadContext.Default) instead of being loaded a
+        // second time into this collectible ALC. In .NET, Type identity = assembly + the
+        // ALC that loaded it, so a second copy would yield a *distinct* IScepCrypto /
+        // IScepKey Type that fails (InvalidCastException) when cast across the boundary.
+        // Sharing the host's copy guarantees a single Type identity for the contract types,
+        // letting a path-loaded provider's IScepCrypto/IScepKey instances flow back to the
+        // host transparently.
         if (name.Name == "ScepTestClient.CryptoApi") {
             return null;
         }
