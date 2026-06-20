@@ -76,4 +76,37 @@ public sealed class SplitCertEnrollTests {
             await server.DisposeAsync();
         }
     }
+
+    [Fact]
+    public async Task Enroll_through_ec_key_agreement_ra_cert_succeeds() {
+        FakeScepServer server;
+        BouncyCastleScepCrypto crypto;
+        ScepClient client;
+        string root;
+        KeySpec spec;
+        IScepKey key;
+        string error;
+        EnrollRequest request;
+        ScepResult<EnrollOutcome> outcome;
+
+        server = await FakeScepServer.StartAsync(TestCa.CreateWithRaEncryption("ec"));
+        try {
+            crypto = new BouncyCastleScepCrypto();
+            ScepClient.Create(new ServerConfig { Id = "ec", Url = server.ScepUrl, PreferPost = true }, crypto, handler: null, out client, out _);
+            root = Directory.CreateTempSubdirectory().FullName;
+
+            Assert.True(KeySpec.Parse("rsa:2048", out spec, out error), error);
+            Assert.True(crypto.GenerateKey(spec, out key, out error), error);
+
+            request = new EnrollRequest { Subject = "CN=ec-enroll", Key = key };
+            outcome = client.GetNewCertificate(request, new CertStore(root), new UseRecordLog(root));
+
+            // Succeeds only if the client enveloped to the EC RA cert via ECDH key agreement and the
+            // server decrypted with the EC private key.
+            Assert.True(outcome.IsOk, $"{outcome.Status} {outcome.Error}");
+            Assert.NotNull(outcome.Value.Certificate);
+        } finally {
+            await server.DisposeAsync();
+        }
+    }
 }

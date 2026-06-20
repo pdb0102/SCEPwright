@@ -26,9 +26,24 @@ internal static class BcEnvelope {
             bc_cert = new Org.BouncyCastle.X509.X509CertificateParser().ReadCertificate(recipient_cert.RawData);
             generator.AddKeyTransRecipient(bc_cert);
         } else if (algorithm_oid == OidEc) {
-            // EC key-agreement (KeyAgreeRecipientInfo / ephemeral-static ECDH) is a clean drop-in here
-            // — provider-internal, no contract change — but not implemented yet.
-            throw new NotSupportedException("EC key-agreement recipients are not implemented by this provider");
+            Org.BouncyCastle.Crypto.Parameters.ECPublicKeyParameters recipient_public;
+            Org.BouncyCastle.Crypto.Generators.ECKeyPairGenerator ec_generator;
+            Org.BouncyCastle.Crypto.AsymmetricCipherKeyPair ephemeral;
+
+            // EC key-agreement (KeyAgreeRecipientInfo): ephemeral-static ECDH. The ephemeral originator
+            // key is generated on the recipient's curve, used to derive the KEK, then discarded — it is
+            // a transient internal to this operation, never an IScepKey and never on the contract.
+            bc_cert = new Org.BouncyCastle.X509.X509CertificateParser().ReadCertificate(recipient_cert.RawData);
+            recipient_public = (Org.BouncyCastle.Crypto.Parameters.ECPublicKeyParameters)bc_cert.GetPublicKey();
+            ec_generator = new Org.BouncyCastle.Crypto.Generators.ECKeyPairGenerator("ECDH");
+            ec_generator.Init(new Org.BouncyCastle.Crypto.Parameters.ECKeyGenerationParameters(recipient_public.Parameters, random));
+            ephemeral = ec_generator.GenerateKeyPair();
+            generator.AddKeyAgreementRecipient(
+                CmsEnvelopedGenerator.ECDHSha256Kdf,
+                ephemeral.Private,
+                ephemeral.Public,
+                bc_cert,
+                CmsEnvelopedGenerator.Aes128Wrap);
         } else if (algorithm_oid.StartsWith(OidMlKemArc, StringComparison.Ordinal)) {
             // ML-KEM (RFC 9629 KEMRecipientInfo) — BouncyCastle 2.5.0 has no CMS KEM recipient generator;
             // would be a hand-rolled drop-in here, or supplied by an external provider.

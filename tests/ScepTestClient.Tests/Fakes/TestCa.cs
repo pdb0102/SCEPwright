@@ -66,14 +66,14 @@ public sealed class TestCa {
     // Builds a CA with a SEPARATE RA encryption certificate (RSA): the CA/signing cert carries
     // digitalSignature+keyCertSign (no keyEncipherment), the RA cert carries keyEncipherment.
     // GetCACert then presents both, and requests must be encrypted to the RA cert.
-    public static TestCa CreateWithRaEncryption() {
+    public static TestCa CreateWithRaEncryption(string enc_algo = "rsa") {
         RsaKeyPairGenerator ca_gen;
         AsymmetricCipherKeyPair ca_pair;
         X509Name ca_name;
         X509V3CertificateGenerator ca_cg;
         TestCa ca;
-        RsaKeyPairGenerator ra_gen;
         AsymmetricCipherKeyPair ra_pair;
+        int ra_key_usage;
         X509V3CertificateGenerator ra_cg;
 
         ca_gen = new RsaKeyPairGenerator();
@@ -90,9 +90,7 @@ public sealed class TestCa {
         ca_cg.AddExtension(X509Extensions.KeyUsage, true, new KeyUsage(KeyUsage.DigitalSignature | KeyUsage.KeyCertSign));
         ca = new TestCa(ca_pair, ca_cg.Generate(new Asn1SignatureFactory("SHA256WITHRSA", ca_pair.Private)));
 
-        ra_gen = new RsaKeyPairGenerator();
-        ra_gen.Init(new KeyGenerationParameters(new SecureRandom(), 2048));
-        ra_pair = ra_gen.GenerateKeyPair();
+        ra_pair = GenerateRaKeyPair(enc_algo, out ra_key_usage);
         ra_cg = new X509V3CertificateGenerator();
         ra_cg.SetSerialNumber(BigInteger.ValueOf(2));
         ra_cg.SetIssuerDN(ca_name);
@@ -100,11 +98,47 @@ public sealed class TestCa {
         ra_cg.SetNotBefore(DateTime.UtcNow.AddDays(-1));
         ra_cg.SetNotAfter(DateTime.UtcNow.AddYears(5));
         ra_cg.SetPublicKey(ra_pair.Public);
-        ra_cg.AddExtension(X509Extensions.KeyUsage, true, new KeyUsage(KeyUsage.KeyEncipherment));
+        ra_cg.AddExtension(X509Extensions.KeyUsage, true, new KeyUsage(ra_key_usage));
 
         ca._encryption_key = ra_pair;
         ca.EncryptionCert = new X509Certificate2(ra_cg.Generate(new Asn1SignatureFactory("SHA256WITHRSA", ca_pair.Private)).GetEncoded());
         return ca;
+    }
+
+    // Generates the RA encryption keypair for the chosen algorithm and reports the matching KeyUsage:
+    // RSA/ML-KEM -> keyEncipherment, EC -> keyAgreement.
+    private static AsymmetricCipherKeyPair GenerateRaKeyPair(string enc_algo, out int key_usage) {
+        SecureRandom random;
+
+        random = new SecureRandom();
+        switch (enc_algo.ToLowerInvariant()) {
+            case "rsa": {
+                RsaKeyPairGenerator rsa_gen;
+
+                rsa_gen = new RsaKeyPairGenerator();
+                rsa_gen.Init(new KeyGenerationParameters(random, 2048));
+                key_usage = KeyUsage.KeyEncipherment;
+                return rsa_gen.GenerateKeyPair();
+            }
+            case "ec": {
+                Org.BouncyCastle.Crypto.Generators.ECKeyPairGenerator ec_gen;
+
+                ec_gen = new Org.BouncyCastle.Crypto.Generators.ECKeyPairGenerator("ECDH");
+                ec_gen.Init(new Org.BouncyCastle.Crypto.Parameters.ECKeyGenerationParameters(Org.BouncyCastle.Asn1.Sec.SecObjectIdentifiers.SecP256r1, random));
+                key_usage = KeyUsage.KeyAgreement;
+                return ec_gen.GenerateKeyPair();
+            }
+            case "ml-kem": {
+                Org.BouncyCastle.Crypto.Generators.MLKemKeyPairGenerator mlkem_gen;
+
+                mlkem_gen = new Org.BouncyCastle.Crypto.Generators.MLKemKeyPairGenerator();
+                mlkem_gen.Init(new Org.BouncyCastle.Crypto.Parameters.MLKemKeyGenerationParameters(random, Org.BouncyCastle.Crypto.Parameters.MLKemParameters.ml_kem_768));
+                key_usage = KeyUsage.KeyEncipherment;
+                return mlkem_gen.GenerateKeyPair();
+            }
+            default:
+                throw new ArgumentException($"unsupported RA encryption algorithm '{enc_algo}'");
+        }
     }
 
     // A single CA cert whose KeyUsage is signature-only (digitalSignature+keyCertSign, NO

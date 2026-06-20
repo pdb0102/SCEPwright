@@ -12,10 +12,10 @@ namespace ScepTestClient.Tests;
 // RSA key-transport is exercised end-to-end elsewhere; here we assert the unsupported recipient kinds
 // fail cleanly (no throw) with a recognizable message that Core can turn into a finding.
 public sealed class RecipientEnvelopeTests {
-    [Theory]
-    [InlineData("ml-kem", "ML-KEM")]
-    [InlineData("ec", "EC")]
-    public void Unsupported_recipient_fails_cleanly(string algorithm, string expected_in_error) {
+    // ML-KEM has no CMS recipient generator in BouncyCastle 2.5.0, so it must fail cleanly (no throw)
+    // with a recognizable message. (EC and RSA recipients ARE supported — see the round-trip tests.)
+    [Fact]
+    public void Mlkem_recipient_fails_cleanly() {
         BouncyCastleScepCrypto crypto;
         X509Certificate2 recipient;
         ScepRequestBuilder builder;
@@ -26,7 +26,7 @@ public sealed class RecipientEnvelopeTests {
         bool ok;
 
         crypto = new BouncyCastleScepCrypto();
-        recipient = TestCertFactory.Make(algorithm, KeyUsage.KeyEncipherment);
+        recipient = TestCertFactory.Make("ml-kem", KeyUsage.KeyEncipherment);
         builder = ScepRequestBuilder.For(crypto)
             .CaCertificate(recipient)
             .MessageType(ScepTestClient.CryptoApi.MessageType.PkcsReq)
@@ -37,7 +37,7 @@ public sealed class RecipientEnvelopeTests {
         ok = message.Encode(crypto, out der, out error);
 
         Assert.False(ok);
-        Assert.Contains(expected_in_error, error);
+        Assert.Contains("ML-KEM", error);
     }
 
     [Fact]
