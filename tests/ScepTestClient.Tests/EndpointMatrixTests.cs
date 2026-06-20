@@ -19,6 +19,7 @@ public sealed class EndpointMatrixTests {
     [InlineData("ec-encrypt")]
     [InlineData("ec-dual")]
     [InlineData("ecdsa-rsa")]
+    [InlineData("mldsa-rsa")]
     public async Task Enroll_succeeds_against_supported_profile(string profile) {
         FakeScepServer server;
         ScepResult<EnrollOutcome> outcome;
@@ -36,6 +37,7 @@ public sealed class EndpointMatrixTests {
     [Theory]
     [InlineData("mlkem-encrypt", "ML-KEM")]
     [InlineData("signing-only", "envelop")]
+    [InlineData("mldsa-only", "envelop")]
     public async Task Enroll_fails_with_finding_against_unsupported_profile(string profile, string expected_in_error) {
         FakeScepServer server;
         ScepResult<EnrollOutcome> outcome;

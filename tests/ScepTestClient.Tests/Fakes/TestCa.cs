@@ -249,6 +249,16 @@ public sealed class TestCa {
         return gen.Generate(new CmsProcessableByteArray(System.Array.Empty<byte>()), false).GetEncoded();
     }
 
+    // Builds a CMS SignerInfoGenerator for the CA key via the SignerInfoGeneratorBuilder path, which
+    // in BC 2.6.1 supports RSA, ECDSA, and ML-DSA/SLH-DSA signing keys uniformly (the legacy AddSigner
+    // overloads cannot sign with PQ keys). The base table carries the SCEP signed attributes;
+    // contentType + messageDigest are added automatically.
+    private SignerInfoGenerator BuildCaSigner(Org.BouncyCastle.Asn1.Cms.AttributeTable signed_attrs) {
+        return new SignerInfoGeneratorBuilder()
+            .WithSignedAttributeGenerator(new DefaultSignedAttributeTableGenerator(signed_attrs))
+            .Build(new Asn1SignatureFactory(_ca_signature_algorithm, KeyPair.Private), Certificate);
+    }
+
     public Org.BouncyCastle.X509.X509Certificate Issue(AsymmetricKeyParameter subject_public_key, string subject_dn) {
         X509V3CertificateGenerator cg;
 
@@ -351,7 +361,7 @@ public sealed class TestCa {
 
         ca_cert_store = CollectionUtilities.CreateStore(new[] { Certificate });
         signed_gen = new CmsSignedDataGenerator(new SecureRandom());
-        signed_gen.AddSigner(KeyPair.Private, Certificate, CmsSignedGenerator.DigestSha256, new Org.BouncyCastle.Asn1.Cms.AttributeTable(attrs), null);
+        signed_gen.AddSignerInfoGenerator(BuildCaSigner(new Org.BouncyCastle.Asn1.Cms.AttributeTable(attrs)));
         signed_gen.AddCertificates(ca_cert_store);
         signed_data = signed_gen.Generate(new CmsProcessableByteArray(degenerate_bytes), true);
         return signed_data.GetEncoded();
@@ -389,7 +399,7 @@ public sealed class TestCa {
 
         ca_cert_store = CollectionUtilities.CreateStore(new[] { Certificate });
         signed_gen = new CmsSignedDataGenerator(new SecureRandom());
-        signed_gen.AddSigner(KeyPair.Private, Certificate, CmsSignedGenerator.DigestSha256, signed_attr_table, null);
+        signed_gen.AddSignerInfoGenerator(BuildCaSigner(signed_attr_table));
         signed_gen.AddCertificates(ca_cert_store);
 
         enveloped_content = new CmsProcessableByteArray(enveloped_bytes);
