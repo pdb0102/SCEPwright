@@ -289,6 +289,7 @@ public static class CommandRouter {
         string? subject;
         string? challenge;
         string? key_spec_str;
+        string? alt_key_spec_str;
         string? sid;
         int verbosity;
         bool encrypt_keys;
@@ -302,6 +303,7 @@ public static class CommandRouter {
         string key_spec_error;
         IScepKey key;
         string key_error;
+        IScepKey? alt_key;
         ScepClient client;
         string client_error;
         ScepClientResult create_result;
@@ -313,7 +315,7 @@ public static class CommandRouter {
         string challenge_error;
 
         if (args.Length < 2) {
-            output.WriteLine("usage: get <serverId> --subject \"CN=x\" [--challenge <pw>] [--simulator <url>] [--ndes --ndes-user <u> --ndes-password <p> [--ndes-admin-url <url>]] [--key-spec rsa:2048] [--sid <s>] [-v]");
+            output.WriteLine("usage: get <serverId> --subject \"CN=x\" [--challenge <pw>] [--simulator <url>] [--ndes --ndes-user <u> --ndes-password <p> [--ndes-admin-url <url>]] [--key-spec rsa:2048] [--alt-key-spec ml-dsa:65] [--sid <s>] [-v]");
             return 2;
         }
 
@@ -321,6 +323,7 @@ public static class CommandRouter {
         subject = Opt(args, "--subject");
         challenge = null;
         key_spec_str = Opt(args, "--key-spec") ?? "rsa:2048";
+        alt_key_spec_str = Opt(args, "--alt-key-spec");
         sid = Opt(args, "--sid");
         verbosity = CountFlag(args, "-v");
         encrypt_keys = HasFlag(args, "--encrypt-keys");
@@ -369,6 +372,23 @@ public static class CommandRouter {
             return 1;
         }
 
+        alt_key = null;
+        if (!string.IsNullOrWhiteSpace(alt_key_spec_str)) {
+            KeySpec alt_spec;
+            string alt_spec_error;
+            string alt_key_error;
+
+            if (!KeySpec.Parse(alt_key_spec_str!, out alt_spec, out alt_spec_error)) {
+                output.WriteLine($"invalid alt key spec: {alt_spec_error}");
+                return 2;
+            }
+
+            if (!crypto.GenerateKey(alt_spec, out alt_key, out alt_key_error)) {
+                output.WriteLine($"alt key generation failed: {alt_key_error}");
+                return 1;
+            }
+        }
+
         config = new ServerConfig {
             Id = stored.Id,
             Url = new Uri(stored.Url),
@@ -388,6 +408,7 @@ public static class CommandRouter {
         request = new EnrollRequest {
             Subject = subject,
             Key = key,
+            AltKey = alt_key,
             ChallengePassword = challenge,
             Sid = sid,
         };
@@ -938,7 +959,7 @@ public static class CommandRouter {
         output.WriteLine("  servers show <id>");
         output.WriteLine("  servers suggest <id>");
         output.WriteLine("  getcacaps <serverId>");
-        output.WriteLine("  get <serverId> --subject \"CN=x\" [--challenge <pw>] [--key-spec rsa:2048] [--sid <s>] [-v]");
+        output.WriteLine("  get <serverId> --subject \"CN=x\" [--challenge <pw>] [--key-spec rsa:2048] [--alt-key-spec ml-dsa:65] [--sid <s>] [-v]");
         output.WriteLine("  certs list [serverId]");
         output.WriteLine("  getcacert <serverId>");
         output.WriteLine("  getnextcacert <serverId>");

@@ -677,6 +677,7 @@ public sealed class ScepClient {
         csr = new Pkcs10();
         csr.SetSubject(request.Subject, out _);
         csr.Key = request.Key;
+        csr.AltKey = request.AltKey;
         csr.ChallengePassword = request.ChallengePassword;
         csr.Sid = request.Sid;
 

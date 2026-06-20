@@ -5,6 +5,7 @@ namespace ScepTestClient.CryptoApi;
 public sealed class Pkcs10 {
     public string Subject { get; private set; } = string.Empty;
     public IScepKey? Key { get; set; }
+    public IScepKey? AltKey { get; set; }
     public string? ChallengePassword { get; set; }
     public List<string> DnsNames { get; } = new();
     public List<string> Upns { get; } = new();

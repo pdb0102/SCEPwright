@@ -7,6 +7,7 @@ namespace ScepTestClient.Core;
 public sealed class EnrollRequest {
     public required string Subject { get; init; }
     public required IScepKey Key { get; init; }
+    public IScepKey? AltKey { get; init; }
     public string? ChallengePassword { get; init; }
     public string DigestOid { get; init; } = Algorithms.OidFor("SHA-256")!;
     public string ContentEncryptionOid { get; init; } = Algorithms.OidFor("AES-128-CBC")!;

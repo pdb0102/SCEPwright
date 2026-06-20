@@ -79,6 +79,18 @@ internal static class BcCsrBuilder {
             any = true;
         }
 
+        if (csr.AltKey is BcKey alt_bc) {
+            Org.BouncyCastle.Asn1.X509.SubjectPublicKeyInfo alt_spki;
+
+            // subjectAltPublicKeyInfo (id-ce-subjectAltPublicKeyInfo, 2.5.29.72). Carries the alt public
+            // key only; the built-in provider does NOT compute altSignatureAlgorithm/altSignatureValue
+            // (bleeding-edge). Mainline X509.SubjectPublicKeyInfoFactory handles both classical and the
+            // mainline PQ key types (Pqc.PqcSubjectPublicKeyInfoFactory throws for the latter).
+            alt_spki = Org.BouncyCastle.X509.SubjectPublicKeyInfoFactory.CreateSubjectPublicKeyInfo(alt_bc.KeyPair.Public);
+            gen.AddExtension(new DerObjectIdentifier("2.5.29.72"), false, alt_spki);
+            any = true;
+        }
+
         return any ? gen.Generate() : null!;
     }
 }

@@ -20,6 +20,7 @@ public sealed class ScepRequestBuilder {
     private X509Certificate2? _signer_cert;
     private IScepKey? _signer_key;
     private IScepKey? _subject_key;
+    private IScepKey? _alt_key;
     private string? _key_spec_text;
     private string? _subject;
     private string? _sid;
@@ -53,6 +54,7 @@ public sealed class ScepRequestBuilder {
     public ScepRequestBuilder Challenge(string challenge) { _challenge = challenge; return this; }
     public ScepRequestBuilder KeySpec(string key_spec_text) { _key_spec_text = key_spec_text; return this; }
     public ScepRequestBuilder SubjectKey(IScepKey key) { _subject_key = key; return this; }
+    public ScepRequestBuilder AltKey(IScepKey key) { _alt_key = key; return this; }
     public ScepRequestBuilder SignerCertificate(X509Certificate2 cert) { _signer_cert = cert; return this; }
     public ScepRequestBuilder SignerKey(IScepKey key) { _signer_key = key; return this; }
     public ScepRequestBuilder IssuerAndSerial(string issuer_name, string serial_hex) { _issuer_name = issuer_name; _serial = serial_hex; return this; }
@@ -150,7 +152,7 @@ public sealed class ScepRequestBuilder {
             return false;
         }
 
-        csr = new Pkcs10 { Key = subject_key, ChallengePassword = _challenge, Sid = _sid };
+        csr = new Pkcs10 { Key = subject_key, AltKey = _alt_key, ChallengePassword = _challenge, Sid = _sid };
         csr.SetSubject(_subject!, out _);
         foreach (string dns in _dns_names) { csr.DnsNames.Add(dns); }
         foreach (string upn in _upns) { csr.Upns.Add(upn); }
