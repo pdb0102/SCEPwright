@@ -1,0 +1,94 @@
+{
+  "planPath": "docs/superpowers/plans/2026-06-20-scep-test-client-phase-3.md",
+  "tasks": [
+    {
+      "id": 1,
+      "subject": "Task 1: FaultDirectives + provider fault branch",
+      "status": "completed",
+      "description": "Fill in FaultDirectives (CorruptSignature/SigningTimeSkew/CorruptInnerContent) + single `if (faults != null)` branch in BcPkiMessage.EncodePkiOperation; thread faults from BouncyCastleScepCrypto. Verify: dotnet test --filter FullyQualifiedName~FaultInjection. Files: src/ScepTestClient.CryptoApi/FaultDirectives.cs, src/ScepTestClient.Crypto.BouncyCastle/BcPkiMessage.cs, src/ScepTestClient.Crypto.BouncyCastle/BouncyCastleScepCrypto.cs, tests/ScepTestClient.Tests/FaultInjectionTests.cs"
+    },
+    {
+      "id": 2,
+      "subject": "Task 2: Builder AllowFaults + client SubmitPkiOperation",
+      "status": "completed",
+      "blockedBy": [1],
+      "description": "ScepRequestBuilder.AllowFaults + Faults property; faults param on SendPkiOperationSync/Async; public SubmitPkiOperation(+Async). Verify: dotnet test --filter FullyQualifiedName~AllowFaults. Files: src/ScepTestClient.Core/ScepRequestBuilder.cs, src/ScepTestClient.Core/ScepClient.cs, tests/ScepTestClient.Tests/AllowFaultsTests.cs"
+    },
+    {
+      "id": 3,
+      "subject": "Task 3: Extend TestCa/FakeScepServer for fault detection",
+      "status": "completed",
+      "blockedBy": [2],
+      "description": "HandlePkiOperation priority ladder -> failInfo (badMessageCheck/badTime/badAlg/badRequest); PendingMode + BuildPendingCertRep; ExpectedChallenge; VerifyOuterSignature/ReadSigningTime/InnerCsrParses helpers. Verify: dotnet test --filter FullyQualifiedName~FaultMatrixServer. Files: tests/ScepTestClient.Tests/Fakes/TestCa.cs, tests/ScepTestClient.Tests/Fakes/FakeScepServer.cs, tests/ScepTestClient.Tests/FaultMatrixServerTests.cs"
+    },
+    {
+      "id": 4,
+      "subject": "Task 4: Test result model + ComplianceEngine (full matrix)",
+      "status": "completed",
+      "blockedBy": [3],
+      "description": "CheckOutcome/CheckResult/TestReport/FaultKind/ComplianceCheck/ComplianceEngine; 7-row §10.1 matrix; RunFull classifies PASSED/FAILED/FINDING. Verify: dotnet test --filter FullyQualifiedName~ComplianceEngine. Files under src/ScepTestClient.Core/Testing/ + tests/ScepTestClient.Tests/ComplianceEngineTests.cs"
+    },
+    {
+      "id": 5,
+      "subject": "Task 5: TestEngine — lifecycle + probe modes",
+      "status": "completed",
+      "blockedBy": [4],
+      "description": "TestEngine.RunLifecycle (GetCACaps->GetCACert->enroll->poll->renew->GetCRL, skip on prereq fail) + RunProbe (beyond-advertised) + RunFull delegate. Verify: dotnet test --filter FullyQualifiedName~TestEngineModes. Files: src/ScepTestClient.Core/Testing/TestEngine.cs, tests/ScepTestClient.Tests/TestEngineModesTests.cs"
+    },
+    {
+      "id": 6,
+      "subject": "Task 6: Security opinion + thresholds + servers suggest",
+      "status": "completed",
+      "description": "OpinionThresholds/SecurityOpinion (postures) + ServerSuggest; ClientConfig.MinRsaKeyBits round-trip. Verify: dotnet test --filter FullyQualifiedName~SecurityOpinion. Files under src/ScepTestClient.Core/Testing/ + Storage/ClientConfig.cs + tests/ScepTestClient.Tests/SecurityOpinionTests.cs"
+    },
+    {
+      "id": 7,
+      "subject": "Task 7: Jamf timing simulation (--jamf-max-wait)",
+      "status": "completed",
+      "blockedBy": [3],
+      "description": "JamfResult + JamfSimulator.Run: enroll; if PENDING poll until success or max_wait exceeded -> TimedOut. Verify: dotnet test --filter FullyQualifiedName~JamfSimulator. Files: src/ScepTestClient.Core/Testing/JamfResult.cs, JamfSimulator.cs, tests/ScepTestClient.Tests/JamfSimulatorTests.cs"
+    },
+    {
+      "id": 8,
+      "subject": "Task 8: Report emitters — JUnit + TRX (XML)",
+      "status": "completed",
+      "blockedBy": [4],
+      "description": "JUnitReport + TrxReport via System.Xml.Linq; well-formed; FAILED->failure, FINDING->system-out. Verify: dotnet test --filter FullyQualifiedName~XmlReport. Files: src/ScepTestClient.Core/Reporting/JUnitReport.cs, TrxReport.cs, tests/ScepTestClient.Tests/XmlReportTests.cs"
+    },
+    {
+      "id": 9,
+      "subject": "Task 9: Report emitters — JSON + Markdown + console summary",
+      "status": "completed",
+      "blockedBy": [4],
+      "description": "JsonReport + MarkdownReport + ConsoleSummary (§12 block). Verify: dotnet test --filter FullyQualifiedName~TextReport. Files: src/ScepTestClient.Core/Reporting/JsonReport.cs, MarkdownReport.cs, ConsoleSummary.cs, tests/ScepTestClient.Tests/TextReportTests.cs"
+    },
+    {
+      "id": 10,
+      "subject": "Task 10: Scenario / playlist runner",
+      "status": "completed",
+      "blockedBy": [4],
+      "description": "ScenarioFile + ScenarioRunner (Parse + Run): steps run+args+expect aggregated into one TestReport. Verify: dotnet test --filter FullyQualifiedName~ScenarioRunner. Files: src/ScepTestClient.Core/Testing/ScenarioFile.cs, ScenarioRunner.cs, tests/ScepTestClient.Tests/ScenarioRunnerTests.cs"
+    },
+    {
+      "id": 11,
+      "subject": "Task 11: Challenge sources (Explicit/Simulator/NDES)",
+      "status": "completed",
+      "description": "IChallengeSource + Explicit/Simulator/NDES + NdesAdminUrl.Derive; FakeHttpEndpoint test fixture; redact via Redaction.Hash. Verify: dotnet test --filter FullyQualifiedName~ChallengeSource. Files under src/ScepTestClient.Core/Challenge/ + tests/ScepTestClient.Tests/Fakes/FakeHttpEndpoint.cs + ChallengeSourceTests.cs"
+    },
+    {
+      "id": 12,
+      "subject": "Task 12: CLI — test lifecycle/full/probe + reports + jamf-max-wait",
+      "status": "completed",
+      "blockedBy": [5, 7, 8, 9],
+      "description": "test noun -> engine; ConsoleSummary print; --report-format repeatable -> <root>/runs/; exit by Failed; --jamf-max-wait step. Verify: dotnet test --filter FullyQualifiedName~CliTestCommand. Files: src/ScepTestClient.Cli/CommandRouter.cs, tests/ScepTestClient.Tests/CliTestCommandTests.cs"
+    },
+    {
+      "id": 13,
+      "subject": "Task 13: CLI — run scenario, servers suggest, challenge-source flags",
+      "status": "completed",
+      "blockedBy": [6, 10, 11],
+      "description": "run <scenario>; servers suggest; --simulator/--ndes* challenge resolution on enroll/get (precedence challenge>simulator>ndes; redacted). Final full-suite green 0 warnings. Verify: dotnet test --filter FullyQualifiedName~CliScenarioSuggest then full dotnet test. Files: src/ScepTestClient.Cli/CommandRouter.cs, tests/ScepTestClient.Tests/CliScenarioSuggestTests.cs"
+    }
+  ],
+  "lastUpdated": "2026-06-20"
+}

@@ -4,83 +4,83 @@
     {
       "id": 1,
       "subject": "Task 1: Validate IScepCrypto seam vs 3 PQ tiers (paper)",
-      "status": "pending",
+      "status": "completed",
       "description": "Produce a committed analysis confirming PQ support is additive-only (no IScepCrypto signature change), grounded in BC 2.5.0 reality, before any code changes. USER-ORDERED GATE.\n\n```json:metadata\n{\"files\": [\"docs/superpowers/analysis/2026-06-20-iscepcrypto-pq-seam-validation.md\"], \"verifyCommand\": \"test -f docs/superpowers/analysis/2026-06-20-iscepcrypto-pq-seam-validation.md && grep -q additive-only docs/superpowers/analysis/2026-06-20-iscepcrypto-pq-seam-validation.md\", \"acceptanceCriteria\": [\"per-tier additive analysis present\", \"states no interface signature changes\", \"records BC 2.5.0 tier C infeasibility\", \"lists new additive surface\"], \"userGate\": true, \"tags\": [\"user-gate\"], \"requiresUserSpecification\": false, \"modelTier\": \"standard\"}\n```"
     },
     {
       "id": 2,
       "subject": "Task 2: PQ algorithm registry entries",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [1],
       "description": "Add ML-DSA/SLH-DSA/ML-KEM entries to the Algorithms registry with correct AlgorithmKind + BcAlgorithms OID constants.\n\n```json:metadata\n{\"files\": [\"src/ScepTestClient.CryptoApi/Algorithms.cs\", \"src/ScepTestClient.Crypto.BouncyCastle/BcAlgorithms.cs\", \"tests/ScepTestClient.Tests/PqAlgorithmsTests.cs\"], \"verifyCommand\": \"dotnet test tests/ScepTestClient.Tests --filter PqAlgorithmsTests\", \"acceptanceCriteria\": [\"ML-DSA/SLH-DSA/ML-KEM resolve with correct kind\", \"existing entries unchanged\"], \"modelTier\": \"standard\"}\n```"
     },
     {
       "id": 3,
       "subject": "Task 3: KeySpec accepts PQ specs",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [1],
       "description": "Extend KeySpec.Parse to accept ml-dsa/slh-dsa/ml-kem additively via a new Parameter property; rsa unchanged.\n\n```json:metadata\n{\"files\": [\"src/ScepTestClient.CryptoApi/KeySpec.cs\", \"tests/ScepTestClient.Tests/PqKeySpecTests.cs\"], \"verifyCommand\": \"dotnet test tests/ScepTestClient.Tests --filter PqKeySpecTests\", \"acceptanceCriteria\": [\"PQ specs parse with Parameter\", \"rsa unchanged\", \"bad specs rejected\"], \"modelTier\": \"standard\"}\n```"
     },
     {
       "id": 4,
       "subject": "Task 4: CryptoCapabilities PQ tiers + provider advertises PQ",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [2],
       "description": "Add additive PqTiers value to CryptoCapabilities; BC provider advertises PQ algs + tiers A=true B=true C=false.\n\n```json:metadata\n{\"files\": [\"src/ScepTestClient.CryptoApi/PqTiers.cs\", \"src/ScepTestClient.CryptoApi/CryptoCapabilities.cs\", \"src/ScepTestClient.Crypto.BouncyCastle/BouncyCastleScepCrypto.cs\", \"tests/ScepTestClient.Tests/PqCapabilitiesTests.cs\"], \"verifyCommand\": \"dotnet test tests/ScepTestClient.Tests --filter PqCapabilitiesTests\", \"acceptanceCriteria\": [\"PqTiers default false\", \"BC advertises A/B true C false\", \"PQ OIDs in caps sets\"], \"modelTier\": \"standard\"}\n```"
     },
     {
       "id": 5,
       "subject": "Task 5: BC tier A — ML-DSA/SLH-DSA keygen + PKCS#8 round-trip",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [2, 3],
       "description": "GenerateKey produces ML-DSA/SLH-DSA keypairs; PKCS#8 export/import round-trip. PQ specifics in BcPqKeys helper. BC names arbitrated by round-trip test.\n\n```json:metadata\n{\"files\": [\"src/ScepTestClient.Crypto.BouncyCastle/BcPqKeys.cs\", \"src/ScepTestClient.Crypto.BouncyCastle/BcKey.cs\", \"src/ScepTestClient.Crypto.BouncyCastle/BouncyCastleScepCrypto.cs\", \"tests/ScepTestClient.Tests/PqKeyGenTests.cs\"], \"verifyCommand\": \"dotnet test tests/ScepTestClient.Tests --filter PqKeyGenTests\", \"acceptanceCriteria\": [\"PQ keygen works\", \"PKCS#8 round-trip preserves oid\", \"RSA unchanged\"], \"modelTier\": \"complex\"}\n```"
     },
     {
       "id": 6,
       "subject": "Task 6: BC tier A — PQ CSR encode (SPKI + signature)",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [5],
       "description": "EncodeCsr emits PQ SubjectPublicKeyInfo + PQ signature; CSR parses and verifies. Signer construction arbitrated by test.\n\n```json:metadata\n{\"files\": [\"src/ScepTestClient.Crypto.BouncyCastle/BcCsrBuilder.cs\", \"tests/ScepTestClient.Tests/PqCsrTests.cs\"], \"verifyCommand\": \"dotnet test tests/ScepTestClient.Tests --filter PqCsrTests\", \"acceptanceCriteria\": [\"PQ CSR parses and verifies\", \"SPKI oid is ML-DSA\", \"RSA CSR unchanged\"], \"modelTier\": \"complex\"}\n```"
     },
     {
       "id": 7,
       "subject": "Task 7: Tier B — catalyst alt-key + --alt-key-spec",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [6],
       "description": "Carry an optional alt public key into the CSR as subjectAltPublicKeyInfo (2.5.29.72) via Pkcs10.AltKey + EnrollRequest/builder/CLI. altSignatureValue not computed (documented limitation).\n\n```json:metadata\n{\"files\": [\"src/ScepTestClient.CryptoApi/Pkcs10.cs\", \"src/ScepTestClient.Crypto.BouncyCastle/BcCsrBuilder.cs\", \"src/ScepTestClient.Core/EnrollRequest.cs\", \"src/ScepTestClient.Core/ScepRequestBuilder.cs\", \"src/ScepTestClient.Core/ScepClient.cs\", \"src/ScepTestClient.Cli/CommandRouter.cs\", \"tests/ScepTestClient.Tests/AltKeyCsrTests.cs\"], \"verifyCommand\": \"dotnet test tests/ScepTestClient.Tests --filter AltKeyCsrTests\", \"acceptanceCriteria\": [\"AltKey additive\", \"subjectAltPublicKeyInfo emitted\", \"no alt-key => no extension\", \"--alt-key-spec wired\"], \"modelTier\": \"complex\"}\n```"
     },
     {
       "id": 8,
       "subject": "Task 8: Capabilities drive opinion (CuttingEdge) + suggest",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [4],
       "description": "Add SecurityOpinion.ClassifySignature (CuttingEdge for PQ) and a ServerSuggest overload that emits a PQ enroll line when provider TierA; CLI wires it.\n\n```json:metadata\n{\"files\": [\"src/ScepTestClient.Core/Testing/SecurityOpinion.cs\", \"src/ScepTestClient.Core/Testing/ServerSuggest.cs\", \"src/ScepTestClient.Cli/CommandRouter.cs\", \"tests/ScepTestClient.Tests/PqOpinionSuggestTests.cs\"], \"verifyCommand\": \"dotnet test tests/ScepTestClient.Tests --filter PqOpinionSuggestTests\", \"acceptanceCriteria\": [\"ClassifySignature CuttingEdge for PQ\", \"suggest includes PQ when TierA\", \"old overload preserved\"], \"modelTier\": \"standard\"}\n```"
     },
     {
       "id": 9,
       "subject": "Task 9: Empirical PQ probe",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [6],
       "description": "Add ProbePq to RunProbe attempting an ML-DSA enroll; reports PASSED/FINDING/FAILED (no GetCACaps PQ keyword). Skipped when no TierA.\n\n```json:metadata\n{\"files\": [\"src/ScepTestClient.Core/Testing/TestEngine.cs\", \"tests/ScepTestClient.Tests/PqProbeTests.cs\"], \"verifyCommand\": \"dotnet test tests/ScepTestClient.Tests --filter PqProbeTests\", \"acceptanceCriteria\": [\"PQ probe row present\", \"graceful on failure\", \"skipped when no TierA\", \"existing rows unchanged\"], \"modelTier\": \"standard\"}\n```"
     },
     {
       "id": 10,
       "subject": "Task 10: crypto info / crypto list CLI",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [4],
       "description": "Add the crypto command: list (algorithms grouped by kind, friendly names) and info (provider source + PQ tiers).\n\n```json:metadata\n{\"files\": [\"src/ScepTestClient.Cli/CryptoCommand.cs\", \"src/ScepTestClient.Cli/CommandRouter.cs\", \"tests/ScepTestClient.Tests/CryptoCommandTests.cs\"], \"verifyCommand\": \"dotnet test tests/ScepTestClient.Tests --filter CryptoCommandTests\", \"acceptanceCriteria\": [\"crypto list shows PQ + classical\", \"crypto info shows tiers\", \"bad verb -> usage non-zero\"], \"modelTier\": \"standard\"}\n```"
     },
     {
       "id": 11,
       "subject": "Task 11: --crypto-provider flag + config set wiring",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [10],
       "description": "Resolve provider DLL path from --crypto-provider/config and thread into every ScepCrypto.Load site; add config set <key> <value>.\n\n```json:metadata\n{\"files\": [\"src/ScepTestClient.Cli/CommandRouter.cs\", \"src/ScepTestClient.Cli/CryptoCommand.cs\", \"src/ScepTestClient.Core/Storage/ClientConfig.cs\", \"tests/ScepTestClient.Tests/CryptoProviderFlagTests.cs\"], \"verifyCommand\": \"dotnet test tests/ScepTestClient.Tests --filter CryptoProviderFlagTests\", \"acceptanceCriteria\": [\"ResolveProviderPath precedence\", \"config set persists\", \"all load sites threaded\", \"bogus path clean error\"], \"modelTier\": \"standard\"}\n```"
     },
     {
       "id": 12,
       "subject": "Task 12: Harden external-provider ALC loading",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [1],
       "description": "Harden ScepCrypto.Load (reject >1 impl) + ProviderLoadContext (shared-contract guarantee); prove path-loaded provider works end to end.\n\n```json:metadata\n{\"files\": [\"src/ScepTestClient.Core/ScepCrypto.cs\", \"src/ScepTestClient.Core/ProviderLoadContext.cs\", \"tests/ScepTestClient.Tests/ProviderLoadTests.cs\"], \"verifyCommand\": \"dotnet test tests/ScepTestClient.Tests --filter ProviderLoad\", \"acceptanceCriteria\": [\"explicit-path load shares contract\", \"no-impl -> error\", \"multi-impl -> error\", \"shared type identity round-trip\"], \"modelTier\": \"standard\"}\n```"
     }
