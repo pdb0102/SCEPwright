@@ -16,12 +16,14 @@ public sealed class BouncyCastleScepCrypto : IScepCrypto {
     public CryptoCapabilities Capabilities { get; } = new CryptoCapabilities {
         Digests = new[] { BcAlgorithms.Sha1, BcAlgorithms.Sha256, BcAlgorithms.Sha512, BcAlgorithms.Md5 },
         Signatures = new[] { BcAlgorithms.Rsa, BcAlgorithms.MlDsa44, BcAlgorithms.MlDsa65, BcAlgorithms.MlDsa87,
-                             BcAlgorithms.SlhDsa128s, BcAlgorithms.SlhDsa192s, BcAlgorithms.SlhDsa256s },
+                             BcAlgorithms.SlhDsa128s, BcAlgorithms.SlhDsa128f, BcAlgorithms.SlhDsa192s,
+                             BcAlgorithms.SlhDsa192f, BcAlgorithms.SlhDsa256s, BcAlgorithms.SlhDsa256f },
         ContentEncryption = new[] { BcAlgorithms.Aes128Cbc, BcAlgorithms.Aes256Cbc, BcAlgorithms.Des3Cbc },
         KeyTransport = new[] { BcAlgorithms.Rsa },
         Kem = new[] { BcAlgorithms.MlKem512, BcAlgorithms.MlKem768, BcAlgorithms.MlKem1024 },
         AsymmetricKeys = new[] { BcAlgorithms.Rsa, BcAlgorithms.MlDsa44, BcAlgorithms.MlDsa65, BcAlgorithms.MlDsa87,
-                                 BcAlgorithms.SlhDsa128s, BcAlgorithms.SlhDsa192s, BcAlgorithms.SlhDsa256s },
+                                 BcAlgorithms.SlhDsa128s, BcAlgorithms.SlhDsa128f, BcAlgorithms.SlhDsa192s,
+                                 BcAlgorithms.SlhDsa192f, BcAlgorithms.SlhDsa256s, BcAlgorithms.SlhDsa256f },
         PqTiers = new PqTiers(TierA: true, TierB: true, TierC: false),
     };
 

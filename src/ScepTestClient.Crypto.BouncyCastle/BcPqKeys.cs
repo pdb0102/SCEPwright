@@ -56,13 +56,25 @@ internal static class BcPqKeys {
                     parameters = SlhDsaParameters.slh_dsa_sha2_128s;
                     oid_name = "SLH-DSA-128s";
                     break;
+                case "128f":
+                    parameters = SlhDsaParameters.slh_dsa_sha2_128f;
+                    oid_name = "SLH-DSA-128f";
+                    break;
                 case "192s":
                     parameters = SlhDsaParameters.slh_dsa_sha2_192s;
                     oid_name = "SLH-DSA-192s";
                     break;
+                case "192f":
+                    parameters = SlhDsaParameters.slh_dsa_sha2_192f;
+                    oid_name = "SLH-DSA-192f";
+                    break;
                 case "256s":
                     parameters = SlhDsaParameters.slh_dsa_sha2_256s;
                     oid_name = "SLH-DSA-256s";
+                    break;
+                case "256f":
+                    parameters = SlhDsaParameters.slh_dsa_sha2_256f;
+                    oid_name = "SLH-DSA-256f";
                     break;
                 default:
                     error = $"unsupported SLH-DSA parameter set '{spec.Parameter}'";
@@ -121,29 +133,17 @@ internal static class BcPqKeys {
         return key.KeyPair.Private is MLDsaPrivateKeyParameters || key.KeyPair.Private is SlhDsaPrivateKeyParameters;
     }
 
-    // Build a PQ ISignatureFactory for the key, using the friendly algorithm name
-    // (e.g. "ML-DSA-65", "SLH-DSA-128s") that BC's Asn1SignatureFactory recognizes.
-    // The resulting factory emits the correct PQ AlgorithmIdentifier for the SPKI/CSR.
+    // Build a PQ ISignatureFactory for the key. Asn1SignatureFactory accepts a string that is either
+    // a registered algorithm name OR a dotted OID. ML-DSA registers the friendly name ("ML-DSA-65"),
+    // but SLH-DSA does NOT register "SLH-DSA-128f" et al. — only the OID resolves. BcKey.AlgorithmOid
+    // is the dotted NIST OID for the (now correct) registry entry, which Asn1SignatureFactory accepts
+    // for both families, so sign by OID uniformly. Emits the correct PQ AlgorithmIdentifier.
     public static ISignatureFactory SignatureFactory(BcKey key) {
-        string algorithm_name;
-
-        algorithm_name = NameFor(key.KeyPair.Private);
-        if (algorithm_name.Length == 0) {
+        if (key.KeyPair.Private is not MLDsaPrivateKeyParameters && key.KeyPair.Private is not SlhDsaPrivateKeyParameters) {
             throw new InvalidOperationException("private key is not a supported post-quantum type");
         }
 
-        return new Asn1SignatureFactory(algorithm_name, key.KeyPair.Private, new SecureRandom());
-    }
-
-    // Resolve the friendly signature algorithm name from a PQ private key's parameter set.
-    private static string NameFor(AsymmetricKeyParameter priv) {
-        if (priv is MLDsaPrivateKeyParameters ml_priv) {
-            return MlDsaNameFor(ml_priv.Parameters);
-        }
-        if (priv is SlhDsaPrivateKeyParameters slh_priv) {
-            return SlhDsaNameFor(slh_priv.Parameters);
-        }
-        return string.Empty;
+        return new Asn1SignatureFactory(key.AlgorithmOid, key.KeyPair.Private, new SecureRandom());
     }
 
     // Map a BC ML-DSA parameter set instance to the registry-friendly name.
@@ -165,11 +165,20 @@ internal static class BcPqKeys {
         if (ReferenceEquals(parameters, SlhDsaParameters.slh_dsa_sha2_128s)) {
             return "SLH-DSA-128s";
         }
+        if (ReferenceEquals(parameters, SlhDsaParameters.slh_dsa_sha2_128f)) {
+            return "SLH-DSA-128f";
+        }
         if (ReferenceEquals(parameters, SlhDsaParameters.slh_dsa_sha2_192s)) {
             return "SLH-DSA-192s";
         }
+        if (ReferenceEquals(parameters, SlhDsaParameters.slh_dsa_sha2_192f)) {
+            return "SLH-DSA-192f";
+        }
         if (ReferenceEquals(parameters, SlhDsaParameters.slh_dsa_sha2_256s)) {
             return "SLH-DSA-256s";
+        }
+        if (ReferenceEquals(parameters, SlhDsaParameters.slh_dsa_sha2_256f)) {
+            return "SLH-DSA-256f";
         }
         return string.Empty;
     }

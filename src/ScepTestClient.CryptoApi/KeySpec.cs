@@ -2,7 +2,9 @@ namespace ScepTestClient.CryptoApi;
 
 public sealed class KeySpec {
     private static readonly string[] MlDsaSets = { "44", "65", "87" };
-    private static readonly string[] SlhDsaSets = { "128s", "192s", "256s" };
+    // SLH-DSA (FIPS 205) SHA2 family, both small (s) and fast (f). A bare set token maps to the
+    // SHA2 variant; the SHAKE family would need a distinct token scheme and is not exposed here.
+    private static readonly string[] SlhDsaSets = { "128s", "128f", "192s", "192f", "256s", "256f" };
     private static readonly string[] MlKemSets = { "512", "768", "1024" };
 
     public string Algorithm { get; }
