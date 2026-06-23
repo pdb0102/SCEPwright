@@ -636,6 +636,67 @@ public class CliRouterPhase2Tests {
         Assert.Contains("GetCACaps", diag.ToString());
     }
 
+    // The PENDING→poll lifecycle must leave a USABLE cert: get goes PENDING (nothing in `certs list`),
+    // then after approval `poll` pairs the issued cert with the saved subject key and persists it, so it
+    // lists AND exports as a PFX (which throws if cert and key don't match — proving the key is right).
+    [Fact]
+    public async Task Pending_enroll_then_poll_persists_a_usable_cert_in_certs_list() {
+        await using ScepServerApp server = await ScepServerApp.StartAsync();
+        string root;
+        StringWriter outw;
+        StringWriter getw;
+        StringWriter list_before;
+        StringWriter pollw;
+        StringWriter list_after;
+        StringWriter exportw;
+        int get_code;
+        string txn;
+        string issuer;
+        int poll_code;
+        string cert_id;
+        int export_code;
+
+        server.Ca.PendingMode = true;
+        root = Directory.CreateTempSubdirectory().FullName;
+        outw = new StringWriter();
+        CommandRouter.Run(new[] { "servers", "add", server.ScepUrl.ToString(), "--name", "fake" }, root, outw);
+
+        // 1. get -> PENDING: no certificate issued, nothing listed yet.
+        getw = new StringWriter();
+        get_code = CommandRouter.Run(new[] { "get", "fake", "--subject", "CN=kevin5", "--challenge", "pw" }, root, getw);
+        Assert.Equal(0, get_code);
+        Assert.Contains("PENDING", getw.ToString());
+
+        list_before = new StringWriter();
+        CommandRouter.Run(new[] { "certs", "list", "fake" }, root, list_before);
+        Assert.DoesNotContain("kevin5", list_before.ToString());
+
+        // The pending record was written, keyed by the transaction id.
+        txn = Path.GetFileName(Directory.GetDirectories(Path.Combine(root, "servers", "fake", "pending"))[0]);
+
+        // 2. CA approves.
+        server.Ca.PendingMode = false;
+
+        // 3. poll -> receives the cert and persists it paired with the saved key.
+        issuer = server.Ca.Certificate.SubjectDN.ToString();
+        pollw = new StringWriter();
+        poll_code = CommandRouter.Run(new[] { "poll", "fake", "--issuer", issuer, "--subject", "CN=kevin5", "--txn", txn }, root, pollw);
+        Assert.Equal(0, poll_code);
+        Assert.Contains("polled:", pollw.ToString());
+
+        // 4. it now appears in `certs list`.
+        list_after = new StringWriter();
+        CommandRouter.Run(new[] { "certs", "list", "fake" }, root, list_after);
+        Assert.Contains("kevin5", list_after.ToString());
+
+        // 5. and it is usable: PFX export pairs cert+key (CopyWithPrivateKey throws on mismatch).
+        cert_id = FirstCertId(root, "fake");
+        exportw = new StringWriter();
+        export_code = CommandRouter.Run(new[] { "certs", "export", $"fake/{cert_id}", "--format", "pfx", "--out", Path.Combine(root, "kevin5.p12"), "--key-pass", "s3cret" }, root, exportw);
+        Assert.Equal(0, export_code);
+        Assert.True(File.Exists(Path.Combine(root, "kevin5.p12")));
+    }
+
     private static string FirstCertId(string root, string server) {
         return Path.GetFileName(Directory.GetDirectories(Path.Combine(root, "servers", server, "certificates"))[0]);
     }

@@ -552,6 +552,16 @@ public static class CommandRouter {
         }
 
         if (outcome.Status == ScepClientResult.Pending) {
+            string pending_txn;
+
+            // Persist the subject key + request so `poll` can later sign the CertPoll with this key
+            // (RFC 8894 §3.3.2) and store the issued cert paired with it. Without this the polled cert
+            // would have no matching key and never appear in `certs list`.
+            pending_txn = outcome.Value?.TransactionId ?? string.Empty;
+            if (pending_txn.Length > 0) {
+                new PendingStore(data_root).Save(stored.Id, pending_txn, request.Key, client.Crypto,
+                    key_spec_text: request.KeySpecText, passphrase: encrypt_keys ? key_pass : null);
+            }
             return ReportPending(client, outcome.Value, subject!, output);
         }
 
@@ -1037,19 +1047,51 @@ public static class CommandRouter {
         string? issuer;
         string? subject;
         string? txn;
+        string? key_pass;
+        PendingStore pending;
+        IScepKey? original_key;
+        PendingStore.PendingRecord? pending_record;
+        IScepKey loaded_key;
+        PendingStore.PendingRecord loaded_record;
+        string load_error;
         ScepResult<EnrollOutcome> result;
 
-        if (args.Length < 2) { output.WriteLine("usage: poll <serverId> --issuer <dn> --subject <dn> --txn <id>"); return 2; }
-        if (!RejectUnknownFlags(args, output, new[] { "--issuer", "--subject", "--txn" }, System.Array.Empty<string>())) { return 2; }
+        if (args.Length < 2) { output.WriteLine("usage: poll <serverId> --issuer <dn> --subject <dn> --txn <id> [--key-pass <pw>]"); return 2; }
+        if (!RejectUnknownFlags(args, output, new[] { "--issuer", "--subject", "--txn", "--key-pass" }, System.Array.Empty<string>())) { return 2; }
         issuer = Opt(args, "--issuer");
         subject = Opt(args, "--subject");
         txn = Opt(args, "--txn");
+        key_pass = Opt(args, "--key-pass");
         if (string.IsNullOrWhiteSpace(issuer) || string.IsNullOrWhiteSpace(subject) || string.IsNullOrWhiteSpace(txn)) { output.WriteLine("--issuer, --subject and --txn are required"); return 2; }
         if (!BuildClient(args, args[1], data_root, output, out client, out stored)) { return 2; }
 
-        result = client.Poll(issuer!, subject!, txn!);
+        // Recover the original enrollment key for this transaction (saved when the request went PENDING),
+        // so the CertPoll is signed with it (RFC 8894 §3.3.2) and the issued cert can be stored as a
+        // usable cert+key pair that shows up in `certs list`.
+        pending = new PendingStore(data_root);
+        original_key = null;
+        pending_record = null;
+        if (pending.TryLoad(stored.Id, txn!, client.Crypto, out loaded_key, out loaded_record, out load_error, passphrase: key_pass)) {
+            original_key = loaded_key;
+            pending_record = loaded_record;
+        } else if (Directory.Exists(Path.Combine(data_root, "servers", stored.Id, "pending", txn!))) {
+            output.WriteLine($"note: {load_error} — polling without it; the issued cert will NOT be stored.");
+        }
+
+        result = client.Poll(issuer!, subject!, txn!, original_key);
         if (result.IsOk && result.Value.Certificate is not null) {
             output.WriteLine($"polled: {result.Value.Certificate.Subject}");
+            if (original_key is not null) {
+                string cert_id;
+
+                cert_id = new CertStore(data_root).Save(stored.Id, result.Value.Certificate, original_key, client.Crypto,
+                    challenge_password: null, renewed_from: null, transaction_id: txn,
+                    passphrase: string.IsNullOrEmpty(key_pass) ? null : key_pass, key_spec_text: pending_record?.KeySpec);
+                pending.Delete(stored.Id, txn!);
+                output.WriteLine($"  stored: {stored.Id}/{cert_id}   (now in `certs list`; use with `renew` / `certs export`)");
+            } else {
+                output.WriteLine("  note: no pending enrollment found for this --txn, so the cert was received but NOT stored (no matching private key). Run the original `get`/`enroll` first.");
+            }
             return 0;
         }
         output.WriteLine($"poll status: {result.Status} (pkiStatus {result.Value?.PkiStatus})");
@@ -1847,7 +1889,7 @@ public static class CommandRouter {
             "  getcacaps <serverId>",
             "  getcacert <serverId> [-v]        (-v shows full CA/RA cert details)",
             "  getnextcacert <serverId>",
-            "  poll <serverId> --issuer <dn> --subject <dn> --txn <id>",
+            "  poll <serverId> --issuer <dn> --subject <dn> --txn <id> [--key-pass <pw>]   (completes a PENDING enroll: stores the issued cert+key in `certs list`)",
             "  getcert <serverId> --issuer <dn> --serial <hex>",
             "  getcrl <serverId> --issuer <dn> --serial <hex>",
             "  servers suggest <id>",

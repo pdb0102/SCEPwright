@@ -535,31 +535,38 @@ public sealed class ScepClient {
     // -------------------------------------------------------------------------
 
     /// <summary>Polls for a pending request (CertPoll / GetCertInitial) by issuer, subject, and transaction id.</summary>
-    public ScepResult<EnrollOutcome> Poll(string issuer_dn, string subject_dn, string transaction_id) {
+    /// <summary>
+    /// Polls for a pending request (CertPoll / GetCertInitial) by issuer, subject, and transaction id.
+    /// When <paramref name="original_key"/> is supplied (the key from the PENDING enrollment), the poll is
+    /// signed with it per RFC 8894 §3.3.2 so the CA returns the cert bound to that key; otherwise a
+    /// transient transport key is used (standalone manual poll, response decrypt only).
+    /// </summary>
+    public ScepResult<EnrollOutcome> Poll(string issuer_dn, string subject_dn, string transaction_id, IScepKey? original_key = null) {
         PkiMessage message;
         IScepKey signer_key;
         string error;
 
-        if (!BuildPollMessage(issuer_dn, subject_dn, transaction_id, out message, out signer_key, out error)) {
+        if (!BuildPollMessage(issuer_dn, subject_dn, transaction_id, original_key, out message, out signer_key, out error)) {
             return ScepResult<EnrollOutcome>.Fail(ScepClientResult.InvalidArgument, error);
         }
         return SendPkiOperationSync(message, signer_key);
     }
 
     /// <summary>Polls for a pending request (CertPoll / GetCertInitial) by issuer, subject, and transaction id.</summary>
-    public async Task<ScepResult<EnrollOutcome>> PollAsync(string issuer_dn, string subject_dn, string transaction_id) {
+    public async Task<ScepResult<EnrollOutcome>> PollAsync(string issuer_dn, string subject_dn, string transaction_id, IScepKey? original_key = null) {
         PkiMessage message;
         IScepKey signer_key;
         string error;
 
-        if (!BuildPollMessage(issuer_dn, subject_dn, transaction_id, out message, out signer_key, out error)) {
+        if (!BuildPollMessage(issuer_dn, subject_dn, transaction_id, original_key, out message, out signer_key, out error)) {
             return ScepResult<EnrollOutcome>.Fail(ScepClientResult.InvalidArgument, error);
         }
         return await SendPkiOperationAsync(message, signer_key).ConfigureAwait(false);
     }
 
-    private bool BuildPollMessage(string issuer_dn, string subject_dn, string transaction_id, out PkiMessage message, out IScepKey signer_key, out string error) {
+    private bool BuildPollMessage(string issuer_dn, string subject_dn, string transaction_id, IScepKey? original_key, out PkiMessage message, out IScepKey signer_key, out string error) {
         X509Certificate2 ca_cert;
+        ScepRequestBuilder builder;
 
         message = null!;
         signer_key = null!;
@@ -568,14 +575,21 @@ public sealed class ScepClient {
             return false;
         }
 
-        if (!ScepRequestBuilder.For(Crypto)
-                .CaCertificate(ca_cert)
-                .MessageType(MessageType.CertPoll)
-                // Deliberate fixed transport key: CertPoll carries no subject key, so this is only the
-                // transient signer that decrypts the CMS response; rsa:2048 is the safe baseline.
-                .KeySpec("rsa:2048")
-                .IssuerAndSubject(issuer_dn, subject_dn)
-                .Build(out message, out signer_key, out error)) {
+        builder = ScepRequestBuilder.For(Crypto)
+            .CaCertificate(ca_cert)
+            .MessageType(MessageType.CertPoll)
+            .IssuerAndSubject(issuer_dn, subject_dn);
+        if (original_key is not null) {
+            // RFC 8894 §3.3.2: sign GetCertInitial with the original enrollment key so the CA returns
+            // the certificate bound to it (and the response enveloped back is decryptable by it).
+            builder.SubjectKey(original_key);
+        } else {
+            // Standalone manual poll: CertPoll carries no subject key, so this is only the transient
+            // signer that decrypts the CMS response; rsa:2048 is the safe baseline.
+            builder.KeySpec("rsa:2048");
+        }
+
+        if (!builder.Build(out message, out signer_key, out error)) {
             return false;
         }
 
