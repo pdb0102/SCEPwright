@@ -89,4 +89,28 @@ public class OrchestrationTests {
         Assert.True(File.Exists(history_file), $"Expected history file at {history_file}");
         Assert.True(File.ReadAllLines(history_file).Length >= 1, "Expected at least one history record");
     }
+
+    // `diagnose -v` is useless if the operator can't see what was actually requested. GetCaCaps must
+    // emit a Debug trace carrying the fully-resolved request URL.
+    [Fact]
+    public void GetCaCaps_emits_a_debug_trace_with_the_resolved_request_url() {
+        BouncyCastleScepCrypto crypto;
+        CannedHandler handler;
+        ScepClient client;
+        System.Collections.Generic.List<ScepTraceEvent> events;
+
+        crypto = new BouncyCastleScepCrypto();
+        handler = new CannedHandler { Pki = System.Text.Encoding.ASCII.GetBytes("POSTPKIOperation\nSHA-256") };
+        Assert.Equal(ScepClientResult.Ok, ScepClient.Create(
+            new ServerConfig { Id = "fake", Url = new Uri("https://host/vedscep/") },
+            crypto, handler, out client, out _));
+
+        events = new System.Collections.Generic.List<ScepTraceEvent>();
+        client.Trace += events.Add;
+        client.GetCaCaps();
+
+        Assert.Contains(events, e => e.Level == TraceLevel.Debug
+            && e.Message.Contains("operation=GetCACaps")
+            && e.Message.Contains("https://host/vedscep/"));
+    }
 }

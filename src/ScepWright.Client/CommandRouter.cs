@@ -707,11 +707,19 @@ public static class CommandRouter {
         ScepResult<System.Collections.Generic.IReadOnlyList<X509Certificate2>> ca;
         RecipientSelection selection;
         int idx;
+        int verbosity;
+        ConsoleTrace tracer;
         System.Collections.Generic.List<string> cap_warnings;
 
-        if (args.Length < 2) { output.WriteLine("usage: diagnose <serverId>"); return 2; }
-        if (!RejectUnknownFlags(args, output, System.Array.Empty<string>(), System.Array.Empty<string>())) { return 2; }
+        if (args.Length < 2) { output.WriteLine("usage: diagnose <serverId> [-v]"); return 2; }
+        if (!RejectUnknownFlags(args, output, System.Array.Empty<string>(), new[] { "-v" })) { return 2; }
         if (!BuildClient(args, args[1], data_root, output, out client, out stored)) { return 2; }
+
+        verbosity = CountFlag(args, "-v");
+        if (verbosity > 0) {
+            tracer = new ConsoleTrace(verbosity);
+            client.Trace += tracer.Handle;
+        }
 
         output.WriteLine($"diagnose {stored.Id}  ({stored.Url})");
         output.WriteLine();
@@ -1835,7 +1843,7 @@ public static class CommandRouter {
 
         return string.Join('\n', new[] {
             header,
-            "  diagnose <serverId>              (read-only health check: caps, CA/RA cert details, recipient verdict)",
+            "  diagnose <serverId> [-v]         (read-only health check: caps, CA/RA cert details, recipient verdict; -v traces the request URLs)",
             "  getcacaps <serverId>",
             "  getcacert <serverId> [-v]        (-v shows full CA/RA cert details)",
             "  getnextcacert <serverId>",

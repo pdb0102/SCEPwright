@@ -615,6 +615,27 @@ public class CliRouterPhase2Tests {
         Assert.Contains("diagnose", text);
     }
 
+    // `diagnose` must accept -v so an operator can see the resolved request URL and trace lines;
+    // it used to reject every flag, exiting 2 (usage error) on `diagnose <server> -v`.
+    [Fact]
+    public async Task Diagnose_accepts_verbose_flag() {
+        await using ScepServerApp server = await ScepServerApp.StartAsync();
+        string root;
+        StringWriter outw;
+        StringWriter diag;
+        int code;
+
+        root = Directory.CreateTempSubdirectory().FullName;
+        outw = new StringWriter();
+        CommandRouter.Run(new[] { "servers", "add", server.ScepUrl.ToString(), "--name", "fake" }, root, outw);
+
+        diag = new StringWriter();
+        code = CommandRouter.Run(new[] { "diagnose", "fake", "-v" }, root, diag);
+
+        Assert.Equal(0, code);
+        Assert.Contains("GetCACaps", diag.ToString());
+    }
+
     private static string FirstCertId(string root, string server) {
         return Path.GetFileName(Directory.GetDirectories(Path.Combine(root, "servers", server, "certificates"))[0]);
     }

@@ -77,6 +77,7 @@ public sealed class ScepClient {
         string text;
 
         Emit(TraceLevel.Info, "GetCaCaps", "sending GetCACaps request");
+        Emit(TraceLevel.Debug, "GetCaCaps", $"GET {_transport.DescribeGet("GetCACaps", Server.CaIdentifier ?? string.Empty)}");
         raw = _transport.Get("GetCACaps", Server.CaIdentifier ?? string.Empty);
         if (!raw.IsOk) {
             return ScepResult<ScepCapabilities>.Fail(raw.Status, raw.Error);
@@ -92,6 +93,7 @@ public sealed class ScepClient {
         string text;
 
         Emit(TraceLevel.Info, "GetCaCaps", "sending GetCACaps request");
+        Emit(TraceLevel.Debug, "GetCaCaps", $"GET {_transport.DescribeGet("GetCACaps", Server.CaIdentifier ?? string.Empty)}");
         raw = await _transport.GetAsync("GetCACaps", Server.CaIdentifier ?? string.Empty).ConfigureAwait(false);
         if (!raw.IsOk) {
             return ScepResult<ScepCapabilities>.Fail(raw.Status, raw.Error);
@@ -112,6 +114,7 @@ public sealed class ScepClient {
         string error;
 
         Emit(TraceLevel.Info, "GetCaCert", "sending GetCACert request");
+        Emit(TraceLevel.Debug, "GetCaCert", $"GET {_transport.DescribeGet("GetCACert", Server.CaIdentifier ?? string.Empty)}");
         raw = _transport.Get("GetCACert", Server.CaIdentifier ?? string.Empty);
         if (!raw.IsOk) {
             return ScepResult<IReadOnlyList<X509Certificate2>>.Fail(raw.Status, raw.Error);
@@ -131,6 +134,7 @@ public sealed class ScepClient {
         string error;
 
         Emit(TraceLevel.Info, "GetCaCert", "sending GetCACert request");
+        Emit(TraceLevel.Debug, "GetCaCert", $"GET {_transport.DescribeGet("GetCACert", Server.CaIdentifier ?? string.Empty)}");
         raw = await _transport.GetAsync("GetCACert", Server.CaIdentifier ?? string.Empty).ConfigureAwait(false);
         if (!raw.IsOk) {
             return ScepResult<IReadOnlyList<X509Certificate2>>.Fail(raw.Status, raw.Error);
