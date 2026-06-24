@@ -225,6 +225,24 @@ cannot replace it because a KEM cannot produce the CMS signature.
   blocked; the RFC posture only shapes defaults and opinion).
 - **pkiStatus:** SUCCESS (0), FAILURE (2), PENDING (3). **failInfo:** badAlg (0), badMessageCheck
   (1), badRequest (2), badTime (3), badCertId (4), plus optional `failInfoText`.
+- **CMS content type (RFC 8894 §3.2):** the outer SignedData `encapContentInfo.eContentType` (and the
+  matching `content-type` signed attribute) is `id-data` - the `envelopedData` OID belongs only to the
+  inner pkcsPKIEnvelope's own `ContentInfo`, not the outer encapsulated content.
+- **CertRep signature verification:** the response signature is checked against the certs embedded in
+  the CertRep **and** the cached GetCACert bundle, so a valid signature whose signer cert the server did
+  not embed is still confirmed. A mismatch/failure is diagnosed, not just flagged: the note reports the
+  *claimed* signer (issuer+serial or subjectKeyIdentifier), the cert actually used to verify (and whether
+  it came from the CertRep or GetCACert), and how many candidates were tried - so a server-implementor can
+  tell a genuinely invalid signature from "we picked cert X but cert Y signed / the signer cert was not
+  provided."
+
+### PENDING enrollment lifecycle
+
+When `get`/`enroll` returns PENDING the subject key and request metadata are persisted under
+`servers/<id>/pending/<txn>/` (keyed by transaction id). A later `poll` reloads that key, signs the
+CertPoll with it (RFC 8894 §3.3.2 - the GetCertInitial must be signed by the original enrollment key, so
+the CA returns the certificate bound to it), and on success stores the issued cert paired with the key
+(then clears the pending record) so it lists, renews, and exports like a synchronous enrollment.
 
 ### Renewal variants
 

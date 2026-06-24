@@ -21,10 +21,10 @@ Unknown flags are rejected (e.g. a typo'd `--keyspec` errors rather than silentl
 ## Test with it - exercise a server for RFC 8894 compliance
 | Command | Purpose |
 |---|---|
-| `scepclient diagnose <serverId>` | read-only health check: caps, CA/RA cert details, and whether requests can be enveloped (spot a wrong RA/CA cert without enrolling) |
+| `scepclient diagnose <serverId> [-v]` | read-only health check: caps, CA/RA cert details, and whether requests can be enveloped (spot a wrong RA/CA cert without enrolling). On an HTTP error the server's response body is surfaced inline (so a 500 shows *why*, not a bare status); `-v` traces the resolved request URLs |
 | `scepclient getcacaps <serverId>` | GetCACaps |
 | `scepclient getcacert <serverId> [-v]` | GetCACert (`-v` prints full cert details: KeyUsage, EKU, validity, thumbprint) / `getnextcacert <serverId>` |
-| `scepclient poll <serverId> --issuer <dn> --subject <dn> --txn <id>` | CertPoll |
+| `scepclient poll <serverId> --issuer <dn> --subject <dn> --txn <id> [--key-pass <pw>]` | CertPoll: completes a PENDING enrollment. Signs the poll with the original enrollment key (saved when `get`/`enroll` returned PENDING) and, on success, stores the issued cert+key so it appears in `certs list` and can be renewed/exported. `--key-pass` unlocks the saved key if it was encrypted |
 | `scepclient getcert <serverId> --issuer <dn> --serial <hex>` | GetCert |
 | `scepclient getcrl <serverId> --issuer <dn> --serial <hex>` | GetCRL |
 | `scepclient servers suggest <id>` | capability/security advice |
