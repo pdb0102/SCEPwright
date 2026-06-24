@@ -44,6 +44,16 @@ public sealed class PkiMessage {
     public byte[]? RecipientNonce { get; set; }
     /// <summary>Gets or sets whether the outer signature verified (decode output).</summary>
     public bool SignatureValid { get; set; }
+    /// <summary>
+    /// Gets or sets the signer identity the response *claimed* (the CMS SignerIdentifier — issuer+serial or
+    /// subjectKeyIdentifier), so a diagnostic can compare who signed against which cert was checked (decode output).
+    /// </summary>
+    public string? SignerClaimedIdentity { get; set; }
+    /// <summary>
+    /// Gets or sets a description of the certificate whose public key actually verified the signature, and
+    /// where it came from (the CertRep's own bag or the GetCACert bundle), or null if none verified (decode output).
+    /// </summary>
+    public string? SignerVerifiedWith { get; set; }
     /// <summary>Gets or sets the decrypted inner content (decode output).</summary>
     public byte[]? DecryptedContent { get; set; }
     /// <summary>Gets or sets the certificates returned in a successful CertRep (decode output).</summary>
@@ -68,7 +78,12 @@ public sealed class PkiMessage {
         return crypto.EncodePkiMessage(this, faults, out der, out error);
     }
 
-    /// <summary>Decodes a SCEP PKI message from DER, decrypting with the given recipient key.</summary>
-    public static bool Decode(IScepCrypto crypto, byte[] der, IScepKey key, CodecOptions options, out PkiMessage message, out string error) =>
-        crypto.DecodePkiMessage(der, key, options, out message, out error);
+    /// <summary>
+    /// Decodes a SCEP PKI message from DER, decrypting with the given recipient key. Pass
+    /// <paramref name="known_certs"/> (e.g. the GetCACert bundle) so a response whose signer cert is not
+    /// embedded can still have its signature verified and diagnosed.
+    /// </summary>
+    public static bool Decode(IScepCrypto crypto, byte[] der, IScepKey key, CodecOptions options, out PkiMessage message, out string error,
+                              IReadOnlyList<X509Certificate2>? known_certs = null) =>
+        crypto.DecodePkiMessage(der, key, options, known_certs, out message, out error);
 }

@@ -138,7 +138,7 @@ internal static class BcPkiMessage {
     private const string Sha1DigestOid = "1.3.14.3.2.26";
 
     public static PkiMessage Decode(byte[] der, BcKey recipient_key, CodecOptions options) {
-        return Decode(der, recipient_key, options, out _);
+        return Decode(der, recipient_key, options, known_certs: null, out _);
     }
 
     // Honors CodecOptions. Strict (0) enforces both a valid CMS signature and a non-legacy signer digest;
@@ -146,14 +146,17 @@ internal static class BcPkiMessage {
     // LenientParsing relaxes both (today's tolerant behavior). On a strict-mode violation the message is
     // still returned (so callers can inspect it), but decode_error is set non-empty so the provider can
     // surface a clean false + error.
-    public static PkiMessage Decode(byte[] der, BcKey recipient_key, CodecOptions options, out string decode_error) {
+    public static PkiMessage Decode(byte[] der, BcKey recipient_key, CodecOptions options,
+                                    System.Collections.Generic.IReadOnlyList<System.Security.Cryptography.X509Certificates.X509Certificate2>? known_certs, out string decode_error) {
         CmsSignedData signed_data;
         IStore<Org.BouncyCastle.X509.X509Certificate> cert_store;
         ICollection<SignerInformation> signer_collection;
         System.Collections.IEnumerator signer_enumerator;
         SignerInformation signer;
-        System.Collections.Generic.IEnumerable<Org.BouncyCastle.X509.X509Certificate> matching_certs;
+        Org.BouncyCastle.X509.X509Certificate? embedded_match;
         Org.BouncyCastle.X509.X509Certificate signer_cert;
+        string verified_source;
+        int candidate_count;
         bool signature_ok;
         bool lenient;
         string digest_oid;
@@ -182,25 +185,63 @@ internal static class BcPkiMessage {
         signer_enumerator.MoveNext();
         signer = (SignerInformation)signer_enumerator.Current;
 
-        matching_certs = cert_store.EnumerateMatches(signer.SignerID);
-        signer_cert = null!;
-        foreach (Org.BouncyCastle.X509.X509Certificate c in matching_certs) {
-            signer_cert = c;
+        // Record who the response *claims* signed it (issuer+serial or subjectKeyIdentifier), so a failed
+        // verification can be diagnosed: genuinely invalid vs. "the signer cert wasn't where we looked".
+        result.SignerClaimedIdentity = FormatSignerId(signer.SignerID);
+
+        // The cert the CertRep itself offered for the claimed signer (matched by SignerIdentifier).
+        embedded_match = null;
+        foreach (Org.BouncyCastle.X509.X509Certificate c in cert_store.EnumerateMatches(signer.SignerID)) {
+            embedded_match = c;
             break;
         }
 
+        // Verify against a candidate pool — the CertRep's own certs first, then the GetCACert bundle — so a
+        // valid signature whose signer cert was simply not embedded is confirmed, and a "claimed cert X but
+        // cert Y actually signed" mismatch is detected rather than reported as a bare failure.
         signature_ok = false;
-        if (signer_cert != null) {
-            try {
-                signature_ok = signer.Verify(signer_cert);
-            } catch {
-                signature_ok = false;
+        signer_cert = null!;
+        verified_source = string.Empty;
+        candidate_count = 0;
+        if (embedded_match != null && TryVerify(signer, embedded_match)) {
+            signature_ok = true;
+            signer_cert = embedded_match;
+            verified_source = "CertRep";
+        } else {
+            foreach (System.ValueTuple<Org.BouncyCastle.X509.X509Certificate, string> candidate in VerificationCandidates(cert_store, known_certs)) {
+                candidate_count++;
+                if (!signature_ok && TryVerify(signer, candidate.Item1)) {
+                    signature_ok = true;
+                    signer_cert = candidate.Item1;
+                    verified_source = candidate.Item2;
+                }
             }
         }
 
         result.SignatureValid = signature_ok;
-        if (!signature_ok) {
-            result.ConformanceNotes.Add(new ConformanceNote(NoteSeverity.Warning, "signature verification failed", "SignedData", "RFC 8894 §3.2"));
+        if (signature_ok && (verified_source != "CertRep" || !ReferenceEquals(signer_cert, embedded_match))) {
+            // Verified, but not by the cert the CertRep presented for the claimed signer — surface what
+            // actually signed, since a peer relying on the CertRep's own bag would call this invalid.
+            result.SignerVerifiedWith = $"{DescribeCert(signer_cert)} (from {verified_source})";
+            result.ConformanceNotes.Add(new ConformanceNote(NoteSeverity.Warning,
+                $"signature is VALID but was verified using the {verified_source} cert [{DescribeCert(signer_cert)}], not the cert the CertRep presented for the claimed signer ({result.SignerClaimedIdentity})"
+                    + (embedded_match == null
+                        ? " — the CertRep embedded no cert matching the claimed signer; the server should include its RA/CA signing cert in the CertRep"
+                        : $" — the embedded cert [{DescribeCert(embedded_match)}] did not verify the signature"),
+                "SignedData", "RFC 8894 §3.2"));
+        } else if (signature_ok) {
+            result.SignerVerifiedWith = $"{DescribeCert(signer_cert)} (from CertRep)";
+        } else {
+            // Nothing verified: report the claimed signer, the cert we checked, and how many we tried, so a
+            // server-implementor can tell a truly bad signature from a wrong-cert / missing-cert situation.
+            result.SignerVerifiedWith = null;
+            result.ConformanceNotes.Add(new ConformanceNote(NoteSeverity.Warning,
+                $"signature verification FAILED — claimed signer: {result.SignerClaimedIdentity}; "
+                    + (embedded_match != null
+                        ? $"the cert the CertRep presented for that signer [{DescribeCert(embedded_match)}] did not verify; "
+                        : "no cert embedded in the CertRep matched the claimed signer; ")
+                    + $"tried {candidate_count} candidate cert(s) from the CertRep bag and the GetCACert bundle and none produced a valid signature — the signature is invalid against every available cert (wrong signing key, altered message, or the real signing cert was provided by neither GetCACert nor the CertRep)",
+                "SignedData", "RFC 8894 §3.2"));
         }
 
         // Strict-mode gate 1 — signature integrity. Fail unless the caller opted into tolerance
@@ -305,6 +346,47 @@ internal static class BcPkiMessage {
         }
 
         return certs;
+    }
+
+    private static bool TryVerify(SignerInformation signer, Org.BouncyCastle.X509.X509Certificate cert) {
+        try {
+            return signer.Verify(cert);
+        } catch {
+            return false;
+        }
+    }
+
+    // The candidate certificates the response signature is checked against: every cert embedded in the
+    // CertRep, then the caller-supplied GetCACert bundle (so a signer cert the server didn't embed is found).
+    private static System.Collections.Generic.IEnumerable<System.ValueTuple<Org.BouncyCastle.X509.X509Certificate, string>> VerificationCandidates(
+            IStore<Org.BouncyCastle.X509.X509Certificate> embedded,
+            System.Collections.Generic.IReadOnlyList<System.Security.Cryptography.X509Certificates.X509Certificate2>? known_certs) {
+        Org.BouncyCastle.X509.X509CertificateParser parser;
+
+        foreach (Org.BouncyCastle.X509.X509Certificate c in embedded.EnumerateMatches(new Org.BouncyCastle.X509.Store.X509CertStoreSelector())) {
+            yield return new System.ValueTuple<Org.BouncyCastle.X509.X509Certificate, string>(c, "CertRep");
+        }
+        if (known_certs != null) {
+            parser = new Org.BouncyCastle.X509.X509CertificateParser();
+            foreach (System.Security.Cryptography.X509Certificates.X509Certificate2 kc in known_certs) {
+                yield return new System.ValueTuple<Org.BouncyCastle.X509.X509Certificate, string>(parser.ReadCertificate(kc.RawData), "GetCACert");
+            }
+        }
+    }
+
+    // "issuer 'CN=..', serial 0A" for an issuerAndSerialNumber signer, or "subjectKeyIdentifier <hex>".
+    private static string FormatSignerId(Org.BouncyCastle.Cms.SignerID id) {
+        if (id.Issuer != null && id.SerialNumber != null) {
+            return $"issuer '{id.Issuer}', serial {id.SerialNumber.ToString(16)}";
+        }
+        if (id.SubjectKeyIdentifier != null) {
+            return $"subjectKeyIdentifier {Org.BouncyCastle.Utilities.Encoders.Hex.ToHexString(id.SubjectKeyIdentifier)}";
+        }
+        return "(unspecified signer identifier)";
+    }
+
+    private static string DescribeCert(Org.BouncyCastle.X509.X509Certificate cert) {
+        return $"subject '{cert.SubjectDN}', serial {cert.SerialNumber.ToString(16)}";
     }
 
     private static IReadOnlyList<byte[]> ExtractCrlsFromDegeneratePkcs7(byte[] der) {

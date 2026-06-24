@@ -179,7 +179,7 @@ public sealed class BouncyCastleScepCrypto : IScepCrypto {
     }
 
     /// <inheritdoc/>
-    public bool DecodePkiMessage(byte[] der, IScepKey recipient_key, CodecOptions options, out PkiMessage message, out string error) {
+    public bool DecodePkiMessage(byte[] der, IScepKey recipient_key, CodecOptions options, System.Collections.Generic.IReadOnlyList<System.Security.Cryptography.X509Certificates.X509Certificate2>? known_certs, out PkiMessage message, out string error) {
         message = null!;
         error = string.Empty;
 
@@ -191,7 +191,7 @@ public sealed class BouncyCastleScepCrypto : IScepCrypto {
         try {
             string decode_error;
 
-            message = BcPkiMessage.Decode(der, bc_key, options, out decode_error);
+            message = BcPkiMessage.Decode(der, bc_key, options, known_certs, out decode_error);
             if (decode_error.Length > 0) {
                 error = decode_error;
                 return false;

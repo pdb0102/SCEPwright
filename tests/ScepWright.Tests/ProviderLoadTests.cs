@@ -100,7 +100,7 @@ public class ProviderLoadTests {
         public bool GenerateKey(KeySpec spec, out IScepKey key, out string error) => throw new NotImplementedException();
         public bool EncodeCsr(Pkcs10 csr, out byte[] der, out string error) => throw new NotImplementedException();
         public bool EncodePkiMessage(PkiMessage message, FaultDirectives? faults, out byte[] der, out string error) => throw new NotImplementedException();
-        public bool DecodePkiMessage(byte[] der, IScepKey recipient_key, CodecOptions options, out PkiMessage message, out string error) => throw new NotImplementedException();
+        public bool DecodePkiMessage(byte[] der, IScepKey recipient_key, CodecOptions options, System.Collections.Generic.IReadOnlyList<System.Security.Cryptography.X509Certificates.X509Certificate2>? known_certs, out PkiMessage message, out string error) => throw new NotImplementedException();
         public bool ParseCaCertificates(byte[] der, out System.Collections.Generic.IReadOnlyList<System.Security.Cryptography.X509Certificates.X509Certificate2> certs, out string error) => throw new NotImplementedException();
         public bool ExportPrivateKeyPkcs8(IScepKey key, out byte[] der, out string error) => throw new NotImplementedException();
         public bool ImportPrivateKeyPkcs8(byte[] der, out IScepKey key, out string error) => throw new NotImplementedException();

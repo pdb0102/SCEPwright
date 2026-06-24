@@ -40,7 +40,7 @@ public class BcDecodeTests {
 
         cert_rep = ca.BuildSuccessCertRep(issued, client_cert, "abc123", new byte[16]);
 
-        Assert.True(crypto.DecodePkiMessage(cert_rep, key, CodecOptions.LenientParsing, out decoded, out error), error);
+        Assert.True(crypto.DecodePkiMessage(cert_rep, key, CodecOptions.LenientParsing, null, out decoded, out error), error);
         Assert.Equal(PkiStatus.Success, decoded.PkiStatus);
         Assert.True(decoded.SignatureValid);
         Assert.Single(decoded.IssuedCerts);

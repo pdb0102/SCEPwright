@@ -52,7 +52,7 @@ public class CodecOptionsTests {
         client_cert = new System.Security.Cryptography.X509Certificates.X509Certificate2(issued.GetEncoded());
         cert_rep = ca.BuildSuccessCertRep(issued, client_cert, "abc123", new byte[16]);
 
-        Assert.True(crypto.DecodePkiMessage(cert_rep, key, CodecOptions.Strict, out decoded, out error), error);
+        Assert.True(crypto.DecodePkiMessage(cert_rep, key, CodecOptions.Strict, null, out decoded, out error), error);
         Assert.Equal(PkiStatus.Success, decoded.PkiStatus);
     }
 
@@ -73,11 +73,11 @@ public class CodecOptionsTests {
 
         bad_sig = BuildFailureCertRep("SHA256WITHRSA", use_wrong_signing_key: true);
 
-        Assert.False(crypto.DecodePkiMessage(bad_sig, key, CodecOptions.Strict, out decoded, out strict_error));
+        Assert.False(crypto.DecodePkiMessage(bad_sig, key, CodecOptions.Strict, null, out decoded, out strict_error));
         Assert.Contains("signature", strict_error.ToLowerInvariant());
 
-        Assert.True(crypto.DecodePkiMessage(bad_sig, key, CodecOptions.SkipSignatureVerification, out decoded, out skip_error), skip_error);
-        Assert.True(crypto.DecodePkiMessage(bad_sig, key, CodecOptions.LenientParsing, out decoded, out lenient_error), lenient_error);
+        Assert.True(crypto.DecodePkiMessage(bad_sig, key, CodecOptions.SkipSignatureVerification, null, out decoded, out skip_error), skip_error);
+        Assert.True(crypto.DecodePkiMessage(bad_sig, key, CodecOptions.LenientParsing, null, out decoded, out lenient_error), lenient_error);
     }
 
     // A SHA-1-signed response: FAILS under Strict (legacy digest), SUCCEEDS with AllowLegacyAlgorithms or
@@ -98,11 +98,11 @@ public class CodecOptionsTests {
 
         sha1_rep = BuildFailureCertRep("SHA1WITHRSA", use_wrong_signing_key: false);
 
-        Assert.False(crypto.DecodePkiMessage(sha1_rep, key, CodecOptions.Strict, out decoded, out strict_error));
+        Assert.False(crypto.DecodePkiMessage(sha1_rep, key, CodecOptions.Strict, null, out decoded, out strict_error));
         Assert.Contains("legacy", strict_error.ToLowerInvariant());
 
-        Assert.True(crypto.DecodePkiMessage(sha1_rep, key, CodecOptions.AllowLegacyAlgorithms, out decoded, out allow_error), allow_error);
-        Assert.True(crypto.DecodePkiMessage(sha1_rep, key, CodecOptions.LenientParsing, out decoded, out lenient_error), lenient_error);
+        Assert.True(crypto.DecodePkiMessage(sha1_rep, key, CodecOptions.AllowLegacyAlgorithms, null, out decoded, out allow_error), allow_error);
+        Assert.True(crypto.DecodePkiMessage(sha1_rep, key, CodecOptions.LenientParsing, null, out decoded, out lenient_error), lenient_error);
     }
 
     // Builds a signed (but NOT enveloped) failure CertRep with a chosen signature algorithm and, optionally,

@@ -28,7 +28,7 @@ public class BcCrlDecodeTests {
 
         rep = ca.BuildSuccessCrlRep(ca.GenerateCrl(), recipient_cert, "tx", new byte[16]);
 
-        Assert.True(crypto.DecodePkiMessage(rep, recipient_key, CodecOptions.LenientParsing, out decoded, out error), error);
+        Assert.True(crypto.DecodePkiMessage(rep, recipient_key, CodecOptions.LenientParsing, null, out decoded, out error), error);
         Assert.Single(decoded.IssuedCrls);
         parsed = new Org.BouncyCastle.X509.X509CrlParser().ReadCrl(decoded.IssuedCrls[0]);
         Assert.NotNull(parsed);

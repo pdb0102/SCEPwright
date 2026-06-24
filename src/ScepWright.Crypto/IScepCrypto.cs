@@ -22,8 +22,13 @@ public interface IScepCrypto {
     /// <summary>Encodes a SCEP PKI message to DER, optionally injecting the given fault directives for negative testing.</summary>
     bool EncodePkiMessage(PkiMessage message, FaultDirectives? faults, out byte[] der, out string error);
 
-    /// <summary>Decodes a SCEP PKI message from DER, decrypting with the recipient key and applying the given codec options.</summary>
-    bool DecodePkiMessage(byte[] der, IScepKey recipient_key, CodecOptions options, out PkiMessage message, out string error);
+    /// <summary>
+    /// Decodes a SCEP PKI message from DER, decrypting with the recipient key and applying the given codec
+    /// options. <paramref name="known_certs"/> (e.g. the GetCACert bundle) are added to the pool of
+    /// certificates the response signature is verified against, so a valid signature whose signer cert was
+    /// not embedded in the message can still be confirmed and diagnosed.
+    /// </summary>
+    bool DecodePkiMessage(byte[] der, IScepKey recipient_key, CodecOptions options, IReadOnlyList<X509Certificate2>? known_certs, out PkiMessage message, out string error);
 
     /// <summary>Parses a CA certificate bundle (degenerate PKCS#7 or raw cert) from DER.</summary>
     bool ParseCaCertificates(byte[] der, out IReadOnlyList<X509Certificate2> certs, out string error);

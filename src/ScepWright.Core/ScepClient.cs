@@ -20,6 +20,9 @@ namespace ScepWright.Core;
 public sealed class ScepClient {
     private readonly ScepHttpTransport _transport;
     private X509Certificate2? _recipient_cert_cache;
+    // The most recent GetCACert bundle, used as extra candidates when verifying a CertRep signature whose
+    // signer cert the server did not embed in the response.
+    private IReadOnlyList<X509Certificate2>? _ca_bundle_cache;
 
     /// <summary>Gets the crypto provider backing this client.</summary>
     public IScepCrypto Crypto { get; }
@@ -124,6 +127,7 @@ public sealed class ScepClient {
             return ScepResult<IReadOnlyList<X509Certificate2>>.Fail(ScepClientResult.CryptoError, error);
         }
 
+        _ca_bundle_cache = certs;
         return ScepResult<IReadOnlyList<X509Certificate2>>.Ok(certs);
     }
 
@@ -144,6 +148,7 @@ public sealed class ScepClient {
             return ScepResult<IReadOnlyList<X509Certificate2>>.Fail(ScepClientResult.CryptoError, error);
         }
 
+        _ca_bundle_cache = certs;
         return ScepResult<IReadOnlyList<X509Certificate2>>.Ok(certs);
     }
 
@@ -612,7 +617,7 @@ public sealed class ScepClient {
         if (!raw.IsOk) {
             return ScepResult<PkiMessage>.Fail(raw.Status, raw.Error);
         }
-        if (!PkiMessage.Decode(Crypto, raw.Value, message.SignerKey!, CodecOptions.LenientParsing, out decoded, out decode_error)) {
+        if (!PkiMessage.Decode(Crypto, raw.Value, message.SignerKey!, CodecOptions.LenientParsing, out decoded, out decode_error, known_certs: _ca_bundle_cache)) {
             return ScepResult<PkiMessage>.Fail(ScepClientResult.CryptoError, decode_error);
         }
         return ScepResult<PkiMessage>.Ok(decoded);
@@ -634,7 +639,7 @@ public sealed class ScepClient {
         if (!raw.IsOk) {
             return ScepResult<PkiMessage>.Fail(raw.Status, raw.Error);
         }
-        if (!PkiMessage.Decode(Crypto, raw.Value, message.SignerKey!, CodecOptions.LenientParsing, out decoded, out decode_error)) {
+        if (!PkiMessage.Decode(Crypto, raw.Value, message.SignerKey!, CodecOptions.LenientParsing, out decoded, out decode_error, known_certs: _ca_bundle_cache)) {
             return ScepResult<PkiMessage>.Fail(ScepClientResult.CryptoError, decode_error);
         }
         return ScepResult<PkiMessage>.Ok(decoded);
@@ -964,7 +969,7 @@ public sealed class ScepClient {
         X509Certificate2? cert;
         EnrollOutcome outcome;
 
-        if (!PkiMessage.Decode(Crypto, response_bytes, recipient_key, CodecOptions.LenientParsing, out decoded, out decode_error)) {
+        if (!PkiMessage.Decode(Crypto, response_bytes, recipient_key, CodecOptions.LenientParsing, out decoded, out decode_error, known_certs: _ca_bundle_cache)) {
             return ScepResult<EnrollOutcome>.Fail(ScepClientResult.CryptoError, decode_error);
         }
 
